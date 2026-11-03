@@ -64,7 +64,7 @@ public static class TranscriptItemAdapter
                     var lines = content.EndsWith('\n') ? content[..^1].Split('\n') : content.Split('\n');
                     diff = content.Length == 0 ? "" : string.Join("\n", lines.Select(line => (kind == "delete" ? "-" : "+") + line));
                 }
-                changes.Add(new JsonObject { ["path"] = change.Name, ["diff"] = diff, ["kind"] = new JsonObject { ["type"] = kind, ["move_path"] = change.Value.Str("move_path") } });
+                changes.Add((JsonNode)new JsonObject { ["path"] = change.Name, ["diff"] = diff, ["kind"] = new JsonObject { ["type"] = kind, ["move_path"] = change.Value.Str("move_path") } });
             }
             node["changes"] = changes;
         }
