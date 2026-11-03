@@ -44,6 +44,8 @@ public sealed class ProtocolParityUiTests
         var body = string.Join("\n", window.ReviewVisualElements<TextBlock>().Select(t => t.Text));
         StringAssert.Contains(body, "Review complete"); StringAssert.Contains(body, new LocalizationService(language)["FieldAuthor"]);
         StringAssert.Contains(body, new LocalizationService(language)["FieldRecipient"]); Assert.IsFalse(body.Contains("SECRET_ENCRYPTED"));
+        var direction = window.ReviewVisualElements<TextBlock>().Single(t => t.Text == "/root/reviewer → /root");
+        Assert.AreEqual(FlowDirection.LeftToRight, direction.FlowDirection, "Agent paths and the direction arrow must retain their logical order inside RTL chrome");
         Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])));
         foreach (var (_, bounds) in window.ReviewBounds()) Assert.IsTrue(bounds.Right <= window.ReviewRoot.ActualWidth + 1 && bounds.Bottom <= window.ReviewRoot.ActualHeight + 1);
         TestContext.AddResultFile(await window.CaptureReviewAsync($"agent-message-{theme}-{language}"));

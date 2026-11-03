@@ -352,10 +352,10 @@ public sealed partial class TranscriptCard : UserControl
         if (tool?.State == ToolActivityState.Failed && tool.CategoryKey != "EventError") label = row.Text["ToolFailed"] + " · " + label;
         if (tool?.State == ToolActivityState.Interrupted && tool.CategoryKey != "AgentInterrupted") label = row.Text["EventInterrupted"] + " · " + label;
         var summary = tool?.Summary ?? "";
-        if (summary.Length > 0 && tool?.CategoryKey is "AgentMessage" or "ToolCollaboration") summary = "\u2066" + summary + "\u2069";
         var title = label + (summary.Length > 0 ? " " + summary : "");
         if (tool is { AddedLines: { } added, RemovedLines: { } removed }) title += " +" + row.Text.Number(added) + " −" + row.Text.Number(removed);
-        return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, tool?.CategoryKey), row, () =>
+        return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, tool?.CategoryKey,
+            tool?.CategoryKey is "AgentMessage" or "ToolCollaboration" ? label : null, summary), row, () =>
         {
             if (tool is not null) return ActivityDetails.Render(tool, row.Text, row.HistoryChanged);
             var content = new StackPanel { Spacing = 12 };
@@ -395,7 +395,7 @@ public sealed partial class TranscriptCard : UserControl
             return panel;
         }, title);
     }
-    private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryKey = null)
+    private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryKey = null, string? prefix = null, string? technicalSummary = null)
     {
         var header = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
@@ -403,7 +403,18 @@ public sealed partial class TranscriptCard : UserControl
         header.Children.Add(icon);
         var label = new TextBlock { Text = title, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, VerticalAlignment = VerticalAlignment.Center };
         label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
-        Grid.SetColumn(label, 1); header.Children.Add(label);
+        FrameworkElement caption = label;
+        if (prefix is not null && !string.IsNullOrEmpty(technicalSummary))
+        {
+            var parts = new Grid { ColumnSpacing = 6 };
+            parts.ColumnDefinitions.Add(new() { Width = GridLength.Auto, MaxWidth = 160 }); parts.ColumnDefinitions.Add(new());
+            label.Text = prefix; parts.Children.Add(label);
+            var summary = new TextBlock { Text = technicalSummary, FlowDirection = FlowDirection.LeftToRight, TextAlignment = text.IsRightToLeft ? TextAlignment.Right : TextAlignment.Left,
+                FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, VerticalAlignment = VerticalAlignment.Center };
+            summary.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+            Grid.SetColumn(summary, 1); parts.Children.Add(summary); caption = parts;
+        }
+        Grid.SetColumn(caption, 1); header.Children.Add(caption);
         var metadata = state == ToolActivityState.Running ? text["ToolRunning"] : "";
         if (durationMs is { } duration) metadata += (metadata.Length > 0 ? " · " : "") + text.Format("ToolDuration", (duration / 1000d).ToString("0.#", text.Culture));
         if (metadata.Length > 0)
