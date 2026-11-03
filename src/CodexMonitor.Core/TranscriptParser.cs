@@ -42,7 +42,11 @@ public sealed class TranscriptParser
                         {
                             var callId = payload.Str("call_id");
                             if (payload.Str("type") is "function_call_output" or "custom_tool_call_output" && calls.TryGetValue(callId, out var callIndex))
-                                entries[callIndex] = entries[callIndex] with { Text = entries[callIndex].Text + "\n\n" + entry.Text };
+                            {
+                                var call = entries[callIndex];
+                                entries[callIndex] = call with { Text = call.Text + "\n\n" + entry.Text,
+                                    Tool = call.Tool is { } tool ? tool with { Output = entry.Text, State = ToolActivity.CompletedState(entry.Text) } : null };
+                            }
                             else
                             {
                                 if (callId.Length > 0 && payload.Str("type") is "function_call" or "custom_tool_call") calls[callId] = entries.Count;
@@ -118,7 +122,8 @@ public sealed class TranscriptParser
         return type switch
         {
             "message" when p.Str("role") is "user" or "assistant" => new(id, p.Str("role") == "user" ? EntryKind.User : EntryKind.Assistant, Content(p.Field("content")), timestamp),
-            "function_call" or "custom_tool_call" => new(id, EntryKind.Tool, p.Str("arguments", p.Str("input")), timestamp, p.Str("name", "Tool")),
+            "function_call" or "custom_tool_call" => new(id, EntryKind.Tool, p.Str("arguments", p.Str("input")), timestamp, p.Str("name", "Tool"),
+                Tool: new(p.Str("name", "Tool"), p.Str("arguments", p.Str("input")))),
             "function_call_output" or "custom_tool_call_output" => new(id, EntryKind.Tool, p.Field("output").TextValue(), timestamp, "Tool"),
             "reasoning" when p.Field("summary").Items().Any() => new(id, EntryKind.Reasoning, Content(p.Field("summary")), timestamp),
             "message" or "reasoning" => null,

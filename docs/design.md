@@ -19,6 +19,9 @@ Apple HIG 的 Writing 指南用于文案原则：按钮使用简短动词、错�
 * [Microsoft WinUI testing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/testing/)
 * [Apple HIG Writing](https://developer.apple.com/design/human-interface-guidelines/writing)
 * [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server)
+* [OpenAI UI guidelines](https://developers.openai.com/plugins/concepts/ui-guidelines)
+
+工具活动采用 OpenAI 文档中的系统色、系统字体、有限字号层级和一致网格间距原则，并以 Windows 原生按钮实现渐进展开。这里借用交互原则，不将 Web 的 Apps SDK UI 直接移植到 WinUI。每行 36 DIP；左侧为类型图标和动作摘要，右侧为可用耗时与展开箭头。默认不显示重复的“工具”、时间戳或复制栏；详细命令和输出各有复制入口。文件增删计数来自补丁或协议 diff，不凭模型文案估算。自定义原生按钮通过 ExpandCollapse 自动化模式暴露状态，键盘、焦点和主题反馈由 WinUI 提供。
 
 # 应用图标
 

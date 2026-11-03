@@ -15,6 +15,11 @@ public sealed class InstalledCliTests
         var result = await new LocalServerDiscovery().FindAsync(LocalSessionStore.DefaultHome, "codex");
         Assert.IsTrue(result.Any(s => s.Endpoint == "unix://" && s.CanConnect), "The existing daemon must pass the Codex initialize handshake.");
         Console.WriteLine($"Discovered {result.Count} existing local servers; no turns started.");
+        foreach (var server in result.Where(s => s.CanConnect))
+        {
+            await using var client = await SessionServerLocator.OpenAsync(server, LocalSessionStore.DefaultHome, "codex", CancellationToken.None);
+            Assert.IsNotNull(await client.LoadedThreadIdsAsync());
+        }
     }
     [TestMethod]
     [TestCategory("Integration")]

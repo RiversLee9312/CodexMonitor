@@ -25,6 +25,7 @@ public sealed partial class MainWindow
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
         _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language, ShowTools = false };
+        Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _connectionEndpoint = null;
         _cliMissing = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe";
         _text = new(language);
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
@@ -59,6 +60,7 @@ public sealed partial class MainWindow
             ["title"] = Bounds(SessionTitle), ["composer"] = Bounds(Composer), ["send"] = Bounds(SendButton),
             ["find"] = Bounds(FindButton), ["more"] = Bounds(MoreButton), ["messages"] = Bounds(MessageList),
             ["tools"] = Bounds(ToolsCheck), ["status"] = Bounds(ConnectionStatus)
+            , ["sessionConnect"] = Bounds(SessionConnectButton)
         };
         Windows.Foundation.Rect Bounds(FrameworkElement element) => element.TransformToVisual(Root).TransformBounds(new(0, 0, element.ActualWidth, element.ActualHeight));
     }
@@ -79,6 +81,32 @@ public sealed partial class MainWindow
         return path;
     }
     internal static string ScreenshotDirectory => Environment.GetEnvironmentVariable("CODEX_MONITOR_SCREENSHOTS") ?? Path.Combine(AppContext.BaseDirectory, "TestResults", "screenshots");
+    internal bool ReviewSessionAttached => _selected is not null && _attached.Contains(_selected.Id);
+    internal bool ReviewCanCompose => Composer.IsEnabled;
+    internal string ReviewSessionConnectionLabel => SessionConnectButton.Content?.ToString() ?? "";
+    internal string ReviewNotice => Notice.Message;
+    internal void ConfigureSessionConnectionReview(ISessionServerLocator locator, Func<SessionServerMatch, CancellationToken, Task<CodexClient>> open)
+    { _sessionServerLocator = locator; _openSessionServer = open; }
+    internal Task ConnectSessionReviewAsync() => ConnectSessionAsync();
+    internal async Task ShowActivityReviewAsync(bool expand = false)
+    {
+        _settings = _settings with { ShowTools = true };
+        ToolsCheck.IsChecked = true;
+        var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
+        var entries = new List<TranscriptEntry> { new("question", EntryKind.User, "检查连接状态并更新界面。", time), new("summary", EntryKind.Reasoning, "先核对服务器实际加载的会话，再检查当前轮次。", time) };
+        for (int i = 0; i < 5; i++)
+        {
+            var file = new[] { "MainWindow.xaml", "MainWindow.xaml.cs", "Presentation.cs" }[i % 3];
+            var input = i < 3 ? "*** Begin Patch\n*** Update File: D:/repo/" + file + "\n@@\n-old\n+new\n+updated\n*** End Patch" : "rg -n 'OnNewSession' src/CodexMonitor.App/MainWindow.xaml.cs";
+            entries.Add(new("tool" + i, EntryKind.Tool, input + "\n\nCompleted", time, "exec", Tool: new(i < 3 ? "apply_patch" : "exec", input, i < 3 ? "Updated " + file : "662: private async void OnNewSession(object sender, RoutedEventArgs e)", ToolActivityState.Completed, i < 3 ? null : 720)));
+        }
+        entries.Add(new("reply", EntryKind.Assistant, "会话归属已确认，界面已更新。", time));
+        _snapshot = new(_selected!, entries);
+        if (expand) _expandedActivities.Add("tool3");
+        else _expandedActivities.Clear();
+        RenderMessages(true); await SettleAsync();
+    }
+    internal IReadOnlyList<EntryRow> ReviewMessageRows => _messages.ToArray();
 
     internal System.Collections.ObjectModel.ObservableCollection<SessionRow> ReviewSessionRows => _visibleSessionRows;
     internal object ReviewSessionSource => SessionList.ItemsSource;

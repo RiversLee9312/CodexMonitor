@@ -11,7 +11,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.1" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.2" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new { }, ct).ConfigureAwait(false);
     }
@@ -37,9 +37,33 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
         var result = await Rpc.RequestAsync("thread/read", new { threadId = id }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
+    public async Task<IReadOnlySet<string>> LoadedThreadIdsAsync(CancellationToken ct = default)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal); var cursors = new HashSet<string>(); string? cursor = null;
+        do
+        {
+            var page = await Rpc.RequestAsync("thread/loaded/list", new { cursor, limit = 100 }, ct).ConfigureAwait(false);
+            foreach (var id in page.Field("data").Items().Select(x => x.TextValue()).Where(x => x.Length > 0)) ids.Add(id);
+            cursor = page.Str("nextCursor");
+            if (cursor.Length > 0 && !cursors.Add(cursor)) throw new IOException("Repeated pagination cursor");
+        } while (!string.IsNullOrEmpty(cursor));
+        return ids;
+    }
+    public async Task<SessionInfo> RuntimeAsync(string id, CancellationToken ct = default)
+    {
+        var session = await ReadAsync(id, ct).ConfigureAwait(false);
+        return await WithActiveTurnAsync(session, ct).ConfigureAwait(false);
+    }
+    public async Task<SessionInfo> WithActiveTurnAsync(SessionInfo session, CancellationToken ct = default)
+    {
+        if (session.State is not (SessionState.Active or SessionState.Waiting) || session.ActiveTurnId is not null) return session;
+        var page = await Rpc.RequestAsync("thread/turns/list", new { threadId = session.Id, limit = 100, sortDirection = "desc", itemsView = "notLoaded" }, ct).ConfigureAwait(false);
+        var turn = page.Field("data").Items().FirstOrDefault(x => x.Str("status") == "inProgress");
+        return session with { ActiveTurnId = turn.Str("id") is { Length: > 0 } value ? value : null };
+    }
     public async Task<SessionInfo> ResumeAsync(string id, CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("thread/resume", new { threadId = id }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("thread/resume", new { threadId = id, includeTurns = false }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
     public async Task<SessionInfo> StartAsync(string cwd, CancellationToken ct = default)
@@ -91,7 +115,8 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
             "commandExecution" => item.Str("command") + "\n" + item.Str("aggregatedOutput"),
             _ => item.GetRawText()
         };
-        return new(item.Str("id", Guid.NewGuid().ToString()), kind, text, timestamp, type);
+        var tool = kind == EntryKind.Tool ? ToolActivity.FromItem(item) : null;
+        return new(item.Str("id", Guid.NewGuid().ToString()), kind, text, timestamp, type, Tool: tool);
     }
     public static SessionState ParseState(JsonElement status) => status.Str("type") switch
         {

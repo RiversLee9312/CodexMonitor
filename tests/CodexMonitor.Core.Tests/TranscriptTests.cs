@@ -93,6 +93,8 @@ public sealed class TranscriptTests
             """{"type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"D:\\repo"}}""");
         Assert.HasCount(1, result.Entries); Assert.AreEqual("shell", result.Entries[0].Label);
         StringAssert.Contains(result.Entries[0].Text, "pwd"); StringAssert.Contains(result.Entries[0].Text, "D:\\repo");
+        Assert.AreEqual("pwd", result.Entries[0].Tool?.Input); Assert.AreEqual("D:\\repo", result.Entries[0].Tool?.Output);
+        Assert.AreEqual(ToolActivityState.Completed, result.Entries[0].Tool?.State);
     }
 
     [TestMethod]

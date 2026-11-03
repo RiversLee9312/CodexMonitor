@@ -1,7 +1,10 @@
 using CodexMonitor.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using System.Text.RegularExpressions;
@@ -61,14 +64,61 @@ public sealed class SessionRow(SessionInfo session, LocalizationService text, bo
     }
     public override string ToString() => AccessibleName;
 }
-public sealed class EntryRow(TranscriptEntry entry, LocalizationService text)
+public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null)
 {
     public TranscriptEntry Entry { get; } = entry;
     public LocalizationService Text { get; } = text;
+    public IReadOnlyList<TranscriptEntry> Activities { get; } = activities ?? [entry];
+    public HashSet<string> Expanded { get; } = expanded ?? [];
+    public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning;
+    public string ActivityTitle { get { var count = Activities.Count(e => e.Kind == EntryKind.Tool); return count > 0 ? Text.Format("ToolActivities", Text.Number(count)) : Text["Reasoning"]; } }
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
-    public string AccessibleName => Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
+    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
+    public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && Activities.SequenceEqual(row.Activities);
+    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded)
+    {
+        var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
+        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded)); tools.Clear(); } }
+        foreach (var item in entries)
+        {
+            if (item.Kind is EntryKind.Tool or EntryKind.Reasoning)
+            {
+                if (item.Tool is { } tool && tool.CategoryKey == "ToolFileChanges")
+                {
+                    var parts = tool.DisplayParts();
+                    for (int i = 0; i < parts.Count; i++) tools.Add(item with { Id = item.Id + ":edit:" + i, Tool = parts[i] });
+                }
+                else tools.Add(item);
+            }
+            else { Flush(); rows.Add(new(item, text, expanded: expanded)); }
+        }
+        Flush(); return rows;
+    }
     public override string ToString() => AccessibleName;
+}
+
+public sealed class ActivityDisclosure : Button
+{
+    public bool IsExpanded { get; private set; }
+    public event Action? ExpansionChanged;
+    public ActivityDisclosure() => Click += (_, _) => SetExpanded(!IsExpanded);
+    public void SetExpanded(bool expanded)
+    {
+        if (IsExpanded == expanded) return;
+        var before = IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        IsExpanded = expanded; ExpansionChanged?.Invoke();
+        if (FrameworkElementAutomationPeer.FromElement(this) is ActivityDisclosurePeer peer)
+            peer.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, before, expanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed);
+    }
+    protected override AutomationPeer OnCreateAutomationPeer() => new ActivityDisclosurePeer(this);
+    private sealed class ActivityDisclosurePeer(ActivityDisclosure owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider
+    {
+        public ExpandCollapseState ExpandCollapseState => owner.IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
+        public void Collapse() => owner.SetExpanded(false);
+        public void Expand() => owner.SetExpanded(true);
+        protected override object GetPatternCore(PatternInterface patternInterface) => patternInterface == PatternInterface.ExpandCollapse ? this : base.GetPatternCore(patternInterface);
+    }
 }
 
 public sealed class TranscriptCard : UserControl
@@ -80,6 +130,10 @@ public sealed class TranscriptCard : UserControl
     {
         if (Row is not { } row) return;
         var entry = row.Entry;
+        if (row.IsActivityGroup)
+        {
+            Content = new Border { Margin = new Thickness(12, 0, 12, 0), Child = ToolGroup(row) }; return;
+        }
         var panel = new StackPanel { Spacing = 10, Margin = new Thickness(12, 10, 12, 8) };
         var header = new Grid { ColumnSpacing = 12 };
         header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
@@ -112,6 +166,105 @@ public sealed class TranscriptCard : UserControl
             border.BorderThickness = new Thickness(1);
         }
         Content = border;
+    }
+    private static FrameworkElement ToolGroup(EntryRow row)
+    {
+        if (row.Activities.Count == 1) return ToolRow(row.Activities[0], row);
+        // One inline disclosure per operation, without nested group cards or repeated role/time headers.
+        var template = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:TranscriptCard Row='{Binding}'/></DataTemplate>");
+        var itemStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='36'/></Style>");
+        return new ListView { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
+            ItemsSource = row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded)).ToArray() };
+    }
+    private static FrameworkElement ToolRow(TranscriptEntry entry, EntryRow row)
+    {
+        var tool = entry.Tool;
+        var reasoning = entry.Kind == EntryKind.Reasoning;
+        var label = reasoning ? row.Text["Reasoning"] : tool is null ? entry.Label ?? row.Text["Tool"] : tool.CategoryKey == "ToolDetails" ? tool.Name : row.Text[tool.CategoryKey];
+        if (tool is { State: ToolActivityState.Completed or ToolActivityState.Running })
+            label = row.Text[(tool.CategoryKey, tool.State) switch
+            {
+                ("ToolFileChanges", ToolActivityState.Completed) => "ToolEdited", ("ToolFileChanges", _) => "ToolEditing",
+                ("ToolCommand", ToolActivityState.Completed) => "ToolRan", ("ToolCommand", _) => "ToolExecuting",
+                ("ToolSearch", ToolActivityState.Completed) => "ToolSearched", ("ToolSearch", _) => "ToolSearching", _ => tool.CategoryKey
+            }];
+        if (tool?.State == ToolActivityState.Failed) label = row.Text["ToolFailed"] + " · " + label;
+        var reasoningPreview = reasoning ? Regex.Replace(entry.Text, @"\s+", " ") : "";
+        var summary = tool?.Summary ?? reasoningPreview[..Math.Min(100, reasoningPreview.Length)];
+        var title = label + (summary.Length > 0 ? " " + summary : "");
+        if (tool is { AddedLines: { } added, RemovedLines: { } removed }) title += " +" + row.Text.Number(added) + " −" + row.Text.Number(removed);
+        var categoryIcon = reasoning ? "\uE946" : tool?.CategoryKey switch { "ToolFileChanges" => "\uE70F", "ToolSearch" => "\uE721", "ToolCommand" => "\uE756", _ => "\uE8A5" };
+        return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, categoryIcon), row, () =>
+        {
+            var content = new StackPanel { Spacing = 12 };
+            if (tool is null) content.Children.Add(reasoning ? Markdown(entry.Text) : Code(entry.Text));
+            else
+            {
+                AddSection(row.Text[tool.CategoryKey == "ToolCommand" ? "ToolCommand" : tool.CategoryKey == "ToolFileChanges" ? "ToolFileChanges" : "ToolParameters"], tool.DecodedInput);
+                if (tool.Output is { Length: > 0 } output) AddSection(row.Text["ToolOutput"], output);
+            }
+            if (tool is null) content.Children.Add(CopyButton(entry.Text));
+            return content;
+            Button CopyButton(string value)
+            {
+                var copy = new Button { Content = new FontIcon { Glyph = "\uE8C8", FontSize = 13 }, HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 32, MinWidth = 32, Padding = new Thickness(6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
+                AutomationProperties.SetName(copy, row.Text["Copy"]); ToolTipService.SetToolTip(copy, row.Text["Copy"]);
+                copy.Click += (_, _) => { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(value); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); };
+                return copy;
+            }
+            void AddSection(string heading, string value)
+            {
+                var section = new Grid { ColumnSpacing = 8 };
+                section.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); section.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+                section.Children.Add(new TextBlock { Text = heading, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
+                var copy = CopyButton(value); Grid.SetColumn(copy, 1); section.Children.Add(copy); content.Children.Add(section);
+                content.Children.Add(new ScrollViewer { Content = Code(value), MaxHeight = 300, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+            }
+        }, title);
+    }
+    private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryIcon = null)
+    {
+        var header = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
+        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var icon = new FontIcon { Glyph = state == ToolActivityState.Failed ? "\uE783" : categoryIcon ?? "\uE756", FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+        icon.SetResourceReference(FontIcon.ForegroundProperty, state == ToolActivityState.Failed ? "SystemFillColorCriticalBrush" : state == ToolActivityState.Running ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
+        AutomationProperties.SetName(icon, text[state switch { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running => "ToolRunning", _ => "Tool" }]);
+        header.Children.Add(icon);
+        var label = new TextBlock { Text = title, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, VerticalAlignment = VerticalAlignment.Center };
+        label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        Grid.SetColumn(label, 1); header.Children.Add(label);
+        if (durationMs is { } duration)
+        {
+            var elapsed = new TextBlock { Text = text.Format("ToolDuration", (duration / 1000d).ToString("0.#", text.Culture)), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            elapsed.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush"); Grid.SetColumn(elapsed, 2); header.Children.Add(elapsed);
+        }
+        ToolTipService.SetToolTip(header, title); return header;
+    }
+    private static FrameworkElement Expandable(string id, FrameworkElement header, EntryRow row, Func<FrameworkElement> body, string name)
+    {
+        var grid = new Grid(); grid.RowDefinitions.Add(new() { Height = GridLength.Auto }); grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        var toggleContent = new Grid { ColumnSpacing = 12 };
+        toggleContent.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); toggleContent.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        toggleContent.Children.Add(header);
+        var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetAccessibilityView(chevron, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        Grid.SetColumn(chevron, 1); toggleContent.Children.Add(chevron);
+        var toggle = new ActivityDisclosure { Content = toggleContent, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            MinHeight = 36, Padding = new Thickness(10, 6, 10, 6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
+        AutomationProperties.SetName(toggle, name); AutomationProperties.SetAutomationId(toggle, "ActivityToggle-" + id);
+        var content = new Border { Padding = new Thickness(12), Margin = new Thickness(0, 4, 0, 8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Visibility = Visibility.Collapsed };
+        content.SetResourceReference(Border.BackgroundProperty, "ControlFillColorTertiaryBrush"); content.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
+        Grid.SetRow(content, 1); grid.Children.Add(toggle); grid.Children.Add(content);
+        void Update()
+        {
+            var open = toggle.IsExpanded; chevron.Glyph = open ? "\uE70E" : "\uE70D";
+            if (open) { row.Expanded.Add(id); content.Child ??= body(); } else row.Expanded.Remove(id);
+            content.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        }
+        toggle.ExpansionChanged += Update;
+        if (row.Expanded.Contains(id)) toggle.SetExpanded(true);
+        return grid;
     }
     private static FrameworkElement Code(string text)
     {

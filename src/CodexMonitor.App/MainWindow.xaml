@@ -55,11 +55,7 @@
               <TextBlock x:Name="NoSessionsHint" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             </StackPanel>
           </Grid>
-          <Grid Grid.Row="4" ColumnSpacing="8">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button x:Name="ConnectButton" HorizontalAlignment="Stretch" MinHeight="40" Click="OnConnect"/>
-            <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnSettings"><FontIcon Glyph="&#xE713;" FontSize="18"/></Button>
-          </Grid>
+          <Button x:Name="SettingsButton" Grid.Row="4" HorizontalAlignment="Left" Style="{StaticResource IconButtonStyle}" Click="OnSettings"><FontIcon Glyph="&#xE713;" FontSize="18"/></Button>
         </Grid>
       </SplitView.Pane>
       <Border Margin="0,8,12,0" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
@@ -74,12 +70,15 @@
               <TextBlock x:Name="SessionSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+              <Button x:Name="SessionConnectButton" Click="OnSessionConnect" VerticalAlignment="Top" MinHeight="36"/>
               <Button x:Name="FindButton" Style="{StaticResource IconButtonStyle}" Click="OnFind"><FontIcon Glyph="&#xE721;" FontSize="16"/></Button>
               <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}"><FontIcon Glyph="&#xE712;" FontSize="16"/>
                 <Button.Flyout><MenuFlyout>
                   <MenuFlyoutItem x:Name="DetailsMenu" Click="OnDetails"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutItem x:Name="ExportMenu" Click="OnExport"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutItem x:Name="OpenFolderMenu" Click="OnOpenFolder"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE838;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutSeparator/>
+                  <MenuFlyoutItem x:Name="DisconnectMenu" Click="OnConnect"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8D8;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                 </MenuFlyout></Button.Flyout>
               </Button>
             </StackPanel>
