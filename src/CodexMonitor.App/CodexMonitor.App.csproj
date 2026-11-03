@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <Product>Codex Monitor</Product>
     <Description>Native Codex CLI transcript viewer and client</Description>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -18,9 +18,16 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CsWinRTAotWarningLevel>2</CsWinRTAotWarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.5" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.6.5" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.MSIX" Version="1.7.251221100" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.3.1" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
     <ProjectReference Include="..\CodexMonitor.Core\CodexMonitor.Core.csproj" />
     <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
@@ -34,6 +41,12 @@
       <ResolvedFileToPublish Include="$(TargetDir)App.xbf" RelativePath="App.xbf" CopyToPublishDirectory="PreserveNewest"/>
       <ResolvedFileToPublish Include="$(TargetDir)MainWindow.xbf" RelativePath="MainWindow.xbf" CopyToPublishDirectory="PreserveNewest"/>
       <ResolvedFileToPublish Include="$(TargetDir)Styles.xbf" RelativePath="Styles.xbf" CopyToPublishDirectory="PreserveNewest"/>
+    </ItemGroup>
+  </Target>
+  <!-- The SDK marks this runtime asset CopyToPublishDirectory=false; ILC still needs its managed input. -->
+  <Target Name="IncludeWinRtRuntimeForNativeCompilation" BeforeTargets="ComputeIlcCompileInputs" Condition="'$(PublishAot)' == 'true'">
+    <ItemGroup>
+      <IlcReference Include="@(ReferencePath)" Condition="'%(Filename)' == 'WinRT.Runtime'" />
     </ItemGroup>
   </Target>
 </Project>

@@ -13,7 +13,8 @@ using Microsoft.UI.Xaml.Input;
 
 namespace CodexMonitor.App;
 
-public sealed class SessionRow(SessionInfo session, LocalizationService text, bool connected = false, bool hasUnread = false) : INotifyPropertyChanged
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial class SessionRow(SessionInfo session, LocalizationService text, bool connected = false, bool hasUnread = false) : INotifyPropertyChanged
 {
     private LocalizationService _text = text;
     private bool _connected = connected;
@@ -65,11 +66,12 @@ public sealed class SessionRow(SessionInfo session, LocalizationService text, bo
     }
     public override string ToString() => AccessibleName;
 }
-public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null) : INotifyPropertyChanged
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null) : INotifyPropertyChanged
 {
     public TranscriptEntry Entry { get; private set; } = entry;
     public LocalizationService Text { get; private set; } = text;
-    public IReadOnlyList<TranscriptEntry> Activities { get; private set; } = activities ?? [entry];
+    public IReadOnlyList<TranscriptEntry> Activities { get; private set; } = activities ?? new TranscriptEntry[] { entry };
     public HashSet<string> Expanded { get; } = expanded ?? [];
     public bool IsLive { get; private set; } = live;
     public Dictionary<string, double> ScrollOffsets { get; } = scrollOffsets ?? [];
@@ -79,7 +81,7 @@ public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IR
     public string ActivityTitle => Text.Format("Activities", Text.Number(Activities.Count));
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
-    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Tool is { } tool ?
+    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
         (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
         { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
         Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
@@ -110,7 +112,7 @@ public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IR
     public override string ToString() => AccessibleName;
 }
 
-public sealed class ActivityDisclosure : Button
+public sealed partial class ActivityDisclosure : Button
 {
     public bool IsExpanded { get; private set; }
     public event Action? ExpansionChanged;
@@ -135,7 +137,7 @@ public sealed class ActivityDisclosure : Button
             peer.RaisePropertyChangedEvent(ExpandCollapsePatternIdentifiers.ExpandCollapseStateProperty, before, expanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed);
     }
     protected override AutomationPeer OnCreateAutomationPeer() => new ActivityDisclosurePeer(this);
-    private sealed class ActivityDisclosurePeer(ActivityDisclosure owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider
+    private sealed partial class ActivityDisclosurePeer(ActivityDisclosure owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider
     {
         public ExpandCollapseState ExpandCollapseState => owner.IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
         public void Collapse() { if (!owner.IsEnabled) throw new ElementNotEnabledException(); owner.SetExpanded(false); }
@@ -144,7 +146,7 @@ public sealed class ActivityDisclosure : Button
     }
 }
 
-public sealed class TranscriptCard : UserControl
+public sealed partial class TranscriptCard : UserControl
 {
     public static readonly DependencyProperty RowProperty = DependencyProperty.Register(nameof(Row), typeof(EntryRow), typeof(TranscriptCard), new PropertyMetadata(null, Changed));
     public EntryRow? Row { get => (EntryRow?)GetValue(RowProperty); set => SetValue(RowProperty, value); }
@@ -303,7 +305,20 @@ public sealed class TranscriptCard : UserControl
     private static FrameworkElement ToolRow(TranscriptEntry entry, EntryRow row)
     {
         if (entry.Kind == EntryKind.Reasoning)
-            return new Border { Padding = new Thickness(10, 6, 10, 8), Child = Markdown(entry.Text) };
+        {
+            var panel = new StackPanel { Spacing = 4 };
+            var readableSummary = entry.Reasoning?.Summary ?? entry.Text;
+            if (!string.IsNullOrWhiteSpace(readableSummary)) panel.Children.Add(new Border { Padding = new Thickness(10, 6, 10, 8), Child = Markdown(readableSummary) });
+            if (entry.Reasoning?.FullText is { Length: > 0 } full)
+                panel.Children.Add(Expandable(entry.Id + ":thinking", ActivityHeader(row.Text["Thinking"], ToolActivityState.Unknown, row.Text, null, "Thinking"), row, () =>
+                {
+                    var scroll = new ScrollViewer { Content = Markdown(full), MaxHeight = 320, IsVerticalScrollChainingEnabled = true, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+                    AutomationProperties.SetName(scroll, row.Text["Thinking"]);
+                    scroll.ViewChanged += (_, _) => { if (scroll.ScrollableHeight - scroll.VerticalOffset > 24 && AccessibilitySupport.ContainsFocus(scroll)) row.HistoryChanged?.Invoke(true); };
+                    return scroll;
+                }, row.Text["Thinking"]));
+            return panel;
+        }
         var tool = entry.Tool;
         if (tool is { State: ToolActivityState.Running } && !row.IsLive) tool = tool with { State = ToolActivityState.Unknown };
         if (tool?.WaitDurationMs is { } wait) return WaitRow(entry, tool, wait, row);

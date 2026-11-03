@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Parametreleri ve sonuçları okumak için genişletin. Açıp kapatmak için Enter veya Space tuşuna basın.",
   "RawDataHelp": "Tanınmayan içerik burada orijinal veri olarak korunur.",
   "NewSessionsAvailable": "{0} yeni oturum",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Düşünüyor",
+  "OpenSourceLicenses": "Açık kaynak lisansları",
+  "Components": "Bileşenler",
+  "License": "Lisans",
+  "Notices": "Bildirimler"
 }

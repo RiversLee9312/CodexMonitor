@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace CodexMonitor.Core;
 
@@ -11,9 +12,9 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.4" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.5" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
-        await Rpc.NotifyAsync("initialized", new { }, ct).ConfigureAwait(false);
+        await Rpc.NotifyAsync("initialized", new JsonObject(), ct).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<SessionInfo>> ListAsync(CancellationToken ct = default)
     {
@@ -24,7 +25,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
             var seen = new HashSet<string>();
             do
             {
-                var result = await Rpc.RequestAsync("thread/list", new { cursor, limit = 100, sortKey = "updated_at", sourceKinds = AllSources, modelProviders = Array.Empty<string>(), archived, useStateDbOnly = true }, ct).ConfigureAwait(false);
+                var result = await Rpc.RequestAsync("thread/list", new JsonObject { ["cursor"] = cursor, ["limit"] = 100, ["sortKey"] = "updated_at", ["sourceKinds"] = new JsonArray(AllSources.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()), ["modelProviders"] = new JsonArray(), ["archived"] = archived, ["useStateDbOnly"] = true }, ct).ConfigureAwait(false);
                 all.AddRange(result.Field("data").Items().Select(x => ParseSession(x) with { IsArchived = archived }));
                 cursor = result.Str("nextCursor");
                 if (cursor.Length > 0 && !seen.Add(cursor)) throw new IOException("Repeated pagination cursor");
@@ -34,7 +35,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     }
     public async Task<SessionInfo> ReadAsync(string id, CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("thread/read", new { threadId = id }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("thread/read", new JsonObject { ["threadId"] = id }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
     public async Task<IReadOnlySet<string>> LoadedThreadIdsAsync(CancellationToken ct = default)
@@ -42,7 +43,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
         var ids = new HashSet<string>(StringComparer.Ordinal); var cursors = new HashSet<string>(); string? cursor = null;
         do
         {
-            var page = await Rpc.RequestAsync("thread/loaded/list", new { cursor, limit = 100 }, ct).ConfigureAwait(false);
+            var page = await Rpc.RequestAsync("thread/loaded/list", new JsonObject { ["cursor"] = cursor, ["limit"] = 100 }, ct).ConfigureAwait(false);
             foreach (var id in page.Field("data").Items().Select(x => x.TextValue()).Where(x => x.Length > 0)) ids.Add(id);
             cursor = page.Str("nextCursor");
             if (cursor.Length > 0 && !cursors.Add(cursor)) throw new IOException("Repeated pagination cursor");
@@ -57,61 +58,69 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     public async Task<SessionInfo> WithActiveTurnAsync(SessionInfo session, CancellationToken ct = default)
     {
         if (session.State is not (SessionState.Active or SessionState.Waiting) || session.ActiveTurnId is not null) return session;
-        var page = await Rpc.RequestAsync("thread/turns/list", new { threadId = session.Id, limit = 100, sortDirection = "desc", itemsView = "notLoaded" }, ct).ConfigureAwait(false);
+        var page = await Rpc.RequestAsync("thread/turns/list", new JsonObject { ["threadId"] = session.Id, ["limit"] = 100, ["sortDirection"] = "desc", ["itemsView"] = "notLoaded" }, ct).ConfigureAwait(false);
         var turn = page.Field("data").Items().FirstOrDefault(x => x.Str("status") == "inProgress");
         return session with { ActiveTurnId = turn.Str("id") is { Length: > 0 } value ? value : null };
     }
     public async Task<SessionInfo> ResumeAsync(string id, CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("thread/resume", new { threadId = id, includeTurns = false }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("thread/resume", new JsonObject { ["threadId"] = id, ["includeTurns"] = false }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
     public async Task<SessionInfo> StartAsync(string cwd, CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("thread/start", new { cwd = Path.GetFullPath(cwd) }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("thread/start", new JsonObject { ["cwd"] = Path.GetFullPath(cwd) }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
     public async Task<string> SendAsync(string id, string text, string? activeTurnId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
-        var input = new[] { new { type = "text", text, text_elements = Array.Empty<object>() } };
+        var input = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text, ["text_elements"] = new JsonArray() });
         if (!string.IsNullOrEmpty(activeTurnId))
         {
-            var steered = await Rpc.RequestAsync("turn/steer", new { threadId = id, expectedTurnId = activeTurnId, input }, ct).ConfigureAwait(false);
+            var steered = await Rpc.RequestAsync("turn/steer", new JsonObject { ["threadId"] = id, ["expectedTurnId"] = activeTurnId, ["input"] = input }, ct).ConfigureAwait(false);
             return steered.Str("turnId");
         }
-        var result = await Rpc.RequestAsync("turn/start", new { threadId = id, input }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("turn/start", new JsonObject { ["threadId"] = id, ["input"] = input }, ct).ConfigureAwait(false);
         return result.Field("turn").Str("id");
     }
-    public Task InterruptAsync(string id, string turnId, CancellationToken ct = default) => Rpc.RequestAsync("turn/interrupt", new { threadId = id, turnId }, ct);
+    public Task InterruptAsync(string id, string turnId, CancellationToken ct = default) => Rpc.RequestAsync("turn/interrupt", new JsonObject { ["threadId"] = id, ["turnId"] = turnId }, ct);
 
     public async Task<IReadOnlyList<TranscriptEntry>> ReadTranscriptAsync(string id, CancellationToken ct = default)
+        => (await ReadTranscriptStateAsync(id, ct).ConfigureAwait(false)).Entries;
+    public async Task<ServerTranscript> ReadTranscriptStateAsync(string id, CancellationToken ct = default)
     {
         var entries = new List<TranscriptEntry>();
+        var watermarks = new Dictionary<string, long>();
         string? cursor = null;
         var seen = new HashSet<string>();
         do
         {
-            var result = await Rpc.RequestAsync("thread/turns/list", new { threadId = id, cursor, limit = 50, sortDirection = "asc", itemsView = "full" }, ct).ConfigureAwait(false);
+            var response = await Rpc.RequestStampedAsync("thread/turns/list", new JsonObject { ["threadId"] = id, ["cursor"] = cursor, ["limit"] = 50, ["sortDirection"] = "asc", ["itemsView"] = "full" }, ct).ConfigureAwait(false);
+            var result = response.Value;
             foreach (var turn in result.Field("data").Items())
                 foreach (var item in turn.Field("items").Items())
-                    entries.Add(ParseItem(item, turn.Date("createdAt")));
+                { var entry = ParseItem(item, turn.Date("createdAt")); entries.Add(entry); watermarks[entry.Id] = response.Sequence; }
             cursor = result.Str("nextCursor");
             if (cursor.Length > 0 && !seen.Add(cursor)) throw new IOException("Repeated pagination cursor");
         } while (!string.IsNullOrEmpty(cursor));
-        return entries;
+        return new(entries, watermarks);
     }
 
     public static TranscriptEntry ParseItem(JsonElement item, DateTimeOffset timestamp = default, ToolActivityState? lifecycle = null)
     {
         var type = item.Str("type");
+        if (type == "reasoning")
+        {
+            var reasoning = ReasoningContent.Parse(item);
+            return new(item.Str("id", Guid.NewGuid().ToString()), EntryKind.Reasoning, reasoning.DisplayText, timestamp, type, Reasoning: reasoning);
+        }
         var kind = type switch { "userMessage" => EntryKind.User, "agentMessage" => EntryKind.Assistant, "reasoning" => EntryKind.Reasoning,
             "commandExecution" or "fileChange" or "mcpToolCall" or "dynamicToolCall" or "webSearch" or "collabToolCall" or "imageView" or "imageGeneration" or "functionCallOutput" => EntryKind.Tool, _ => EntryKind.Event };
         var text = type switch
         {
             "userMessage" => string.Join("\n", item.Field("content").Items().Select(x => x.Str("text", x.Str("type")))),
             "agentMessage" or "plan" => item.Str("text"),
-            "reasoning" => string.Join("\n", item.Field("summary").Items().Select(x => x.ValueKind == JsonValueKind.Object ? x.Str("text") : x.TextValue())),
             "commandExecution" => item.Str("command") + "\n" + item.Str("aggregatedOutput"),
             _ => item.GetRawText()
         };

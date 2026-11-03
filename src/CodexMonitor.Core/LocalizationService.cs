@@ -40,7 +40,7 @@ public sealed class LocalizationService
     {
         using var stream = typeof(LocalizationService).Assembly.GetManifestResourceStream($"CodexMonitor.Core.Localization.{tag}.json")
             ?? throw new ArgumentException("Language resource not found", nameof(tag));
-        return JsonSerializer.Deserialize<Dictionary<string, string>>(stream)!;
+        return JsonSerializer.Deserialize(stream, CoreJsonContext.Default.DictionaryStringString)!;
     }
 
     public string State(SessionState state) => this[state switch

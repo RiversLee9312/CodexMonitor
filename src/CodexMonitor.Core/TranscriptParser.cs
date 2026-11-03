@@ -125,14 +125,20 @@ public sealed class TranscriptParser
         string Content(JsonElement content) => string.Join("\n", content.Items().Select(x => x.Str("text", x.Str("type") == "input_image" ? "[input_image]" : "")).Where(x => x.Length > 0));
         return type switch
         {
+            "message" when p.Str("role") == "assistant" && p.Str("channel") == "analysis" => Reasoning(p),
             "message" when p.Str("role") is "user" or "assistant" => new(id, p.Str("role") == "user" ? EntryKind.User : EntryKind.Assistant, Content(p.Field("content")), timestamp),
             "function_call" or "custom_tool_call" => new(id, EntryKind.Tool, p.Str("arguments", p.Str("input")), timestamp, p.Str("name", "Tool"),
                 Tool: new(p.Str("name", "Tool"), p.Str("arguments", p.Str("input")))),
             "function_call_output" or "custom_tool_call_output" => new(id, EntryKind.Tool, p.Field("output").TextValue(), timestamp, "Tool"),
-            "reasoning" when p.Field("summary").Items().Any() => new(id, EntryKind.Reasoning, Content(p.Field("summary")), timestamp),
-            "message" or "reasoning" => null,
+            "reasoning" => Reasoning(p),
+            "message" => null,
             "web_search_call" or "image_generation_call" => new(id, EntryKind.Tool, p.GetRawText(), timestamp, type, Tool: ToolActivity.FromItem(p)),
             _ => new(id, EntryKind.Event, p.GetRawText(), timestamp, type, p.GetRawText())
         };
+        TranscriptEntry? Reasoning(JsonElement item)
+        {
+            var content = ReasoningContent.Parse(item);
+            return content.DisplayText.Length == 0 ? null : new(id, EntryKind.Reasoning, content.DisplayText, timestamp, Reasoning: content);
+        }
     }
 }

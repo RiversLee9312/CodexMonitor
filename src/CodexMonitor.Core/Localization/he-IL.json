@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "הרחיבו כדי לקרוא את הפרמטרים והתוצאות. הקישו Enter או Space כדי להרחיב או לכווץ.",
   "RawDataHelp": "תוכן שלא זוהה נשמר כאן כנתונים מקוריים.",
   "NewSessionsAvailable": "{0} סשנים חדשים",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "חושב",
+  "OpenSourceLicenses": "רישיונות קוד פתוח",
+  "Components": "רכיבים",
+  "License": "רישיון",
+  "Notices": "הודעות"
 }

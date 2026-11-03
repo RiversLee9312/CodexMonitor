@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Vouw uit om parameters en resultaten te lezen. Druk op Enter of spatie om te wisselen.",
   "RawDataHelp": "Niet-herkende inhoud wordt hier als oorspronkelijke gegevens bewaard.",
   "NewSessionsAvailable": "{0} nieuwe sessies",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Denkt na",
+  "OpenSourceLicenses": "Open-sourcelicenties",
+  "Components": "Onderdelen",
+  "License": "Licentie",
+  "Notices": "Mededelingen"
 }

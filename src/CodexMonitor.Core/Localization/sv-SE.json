@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Expandera om du vill läsa parametrar och resultat. Tryck på Enter eller blanksteg för att växla.",
   "RawDataHelp": "Okänt innehåll sparas här som ursprungliga data.",
   "NewSessionsAvailable": "{0} nya sessioner",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Tänker",
+  "OpenSourceLicenses": "Licenser för öppen källkod",
+  "Components": "Komponenter",
+  "License": "Licens",
+  "Notices": "Meddelanden"
 }

@@ -19,6 +19,8 @@ public sealed partial class MainWindow
 
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
+        InvalidateTranscriptRead(); SetLatestVisible(false);
+        _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
         foreach (var item in _reviewFontOverrides) item.Element.SetValue(item.Property, item.Value);
         _reviewFontOverrides.Clear();
         if (_client is not null) { await _client.DisposeAsync(); _client = null; }
@@ -218,6 +220,33 @@ public sealed partial class MainWindow
         return scroll.ScrollableHeight - scroll.VerticalOffset < 2;
     }
     internal bool ReviewNativeHighContrast => _themeSettings.HighContrast;
+    internal void ReviewTranscriptFile(string path) { _selected = _selected! with { FilePath = path }; }
+    internal void ReviewLocalReader(Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> reader) => _readLocalTranscript = reader;
+    internal Task ReviewReloadTranscript() => LoadTranscriptAsync(_selected!, false);
+    internal void ReviewAttachTranscriptServer(CodexClient client)
+    { _client = client; ObserveClient(client); ApplyAttachedSession(_selected!, _selected! with { IsLive = true, State = SessionState.Active }); }
+    internal Task ReviewDisconnectTranscriptServer() => ConnectAsync();
+    internal string ReviewTranscriptText => string.Join("\n", _snapshot?.Entries.Select(e => e.Text) ?? Array.Empty<string>());
+    internal async Task ReviewReasoning(string summary, string full)
+    {
+        var reasoning = new ReasoningContent(summary, full);
+        _snapshot = new(_selected!, new[] { new TranscriptEntry("thinking-review", EntryKind.Reasoning, reasoning.DisplayText, default, Reasoning: reasoning) });
+        _expandedActivities.Clear(); RenderMessages(true); await SettleAsync();
+    }
+    internal bool ReviewLatestVisible => _latestVisible && LatestButton.Visibility == Visibility.Visible;
+    internal bool ReviewReasoningHasInlineSummary => Descendants(Descendants(MessageList).OfType<TranscriptCard>().First(c => c.Row?.Entry.Id == "thinking-review")).OfType<RichTextBlock>().Any();
+    internal string ReviewScrollDebug => $"offset={_messageScroll?.VerticalOffset}, max={_messageScroll?.ScrollableHeight}, following={_following}, visible={_latestVisible}";
+    internal double ReviewLatestOpacity => LatestButton.Opacity;
+    internal string ReviewLatestName => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(LatestButton);
+    internal Windows.Foundation.Rect ReviewLatestBounds => LatestButton.TransformToVisual(Root).TransformBounds(new(0, 0, LatestButton.ActualWidth, LatestButton.ActualHeight));
+    internal void ReviewToggleLatest(bool visible) => SetLatestVisible(visible);
+    internal void ReviewJumpLatest() => OnLatest(LatestButton, new RoutedEventArgs());
+    internal async Task<(ContentDialog Dialog, Task Closing)> ReviewOpenSettings()
+    {
+        var opening = SettingsAsync(); await SettleAsync();
+        var dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child as ContentDialog ?? FindVisual<ContentDialog>(p.Child)).First(d => d is not null)!;
+        return (dialog, opening);
+    }
     internal async Task<(double Before, double After, bool Expanded, bool Focused)> ExpandedOutputUpdateReviewAsync()
     {
         var entry = new TranscriptEntry("stream-output", EntryKind.Tool, "echo output", DateTimeOffset.Now,
@@ -272,6 +301,7 @@ public sealed partial class MainWindow
     internal async Task ConnectReviewServerAsync()
     {
         _client = new CodexClient(new JsonRpcClient(new ReviewTransport()));
+        _attached.Add(_selected!.Id);
         UpdateChrome(); ApplyFilter(); await SettleAsync();
     }
     internal async Task DisconnectReviewServerAsync()

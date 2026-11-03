@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Développez pour lire les paramètres et les résultats. Appuyez sur Entrée ou Espace pour afficher ou réduire.",
   "RawDataHelp": "Le contenu non reconnu est conservé ici sous forme de données d’origine.",
   "NewSessionsAvailable": "{0} nouvelles sessions",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Réflexion en cours",
+  "OpenSourceLicenses": "Licences open source",
+  "Components": "Composants",
+  "License": "Licence",
+  "Notices": "Mentions"
 }

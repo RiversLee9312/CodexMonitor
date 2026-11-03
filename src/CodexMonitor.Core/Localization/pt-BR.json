@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Expanda para ler os parâmetros e resultados. Pressione Enter ou Espaço para expandir ou recolher.",
   "RawDataHelp": "O conteúdo não reconhecido é mantido aqui como dados originais.",
   "NewSessionsAvailable": "{0} novas sessões",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Pensando",
+  "OpenSourceLicenses": "Licenças de código aberto",
+  "Components": "Componentes",
+  "License": "Licença",
+  "Notices": "Avisos"
 }

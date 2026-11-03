@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace CodexMonitor.App;
 
-internal sealed class ServerDiscoveryPanel : StackPanel, IDisposable
+internal sealed partial class ServerDiscoveryPanel : StackPanel, IDisposable
 {
     private readonly IServerDiscovery _discovery;
     private readonly Func<string> _home;

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
 namespace CodexMonitor.Core;
@@ -29,7 +30,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             try { using var document = JsonDocument.Parse(value); var root = document.RootElement; value = root.Str("cmd", root.Str("command", root.Str("code", root.Str("input", root.Str("query", root.Str("path", value)))))); }
             catch (JsonException) { }
             var patch = Regex.Match(value, "apply_patch\\(\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
-            if (patch.Success) { try { return JsonSerializer.Deserialize<string>(patch.Groups[1].Value) ?? value; } catch (JsonException) { } }
+            if (patch.Success) { try { return JsonSerializer.Deserialize(patch.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { } }
             return value;
         }
     }
@@ -65,7 +66,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             var command = Regex.Match(value, "(?:cmd|command)\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
             if (command.Success)
             {
-                try { value = JsonSerializer.Deserialize<string>(command.Groups[1].Value) ?? value; } catch (JsonException) { }
+                try { value = JsonSerializer.Deserialize(command.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { }
             }
             if (CategoryKey == "ToolReadOutput") return "";
             return Compact(value);
@@ -120,7 +121,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             "mcpToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration,
                 string.Join(" · ", new[] { item.Str("server"), item.Str("tool") }.Where(s => s.Length > 0)), "ToolMcp"),
             "dynamicToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("contentItems").TextValue(), state, duration, item.Str("tool"), "ToolDynamic"),
-            "collabToolCall" => new(type, JsonSerializer.Serialize(new { tool = item.Str("tool"), receiverThreadId = item.Str("receiverThreadId", item.Str("newThreadId")), prompt = item.Str("prompt") }), item.Field("agentStatus").TextValue(), state, duration, item.Str("tool") + " " + item.Str("receiverThreadId", item.Str("newThreadId")), "ToolCollaboration"),
+            "collabToolCall" => new(type, new JsonObject { ["tool"] = item.Str("tool"), ["receiverThreadId"] = item.Str("receiverThreadId", item.Str("newThreadId")), ["prompt"] = item.Str("prompt") }.ToJsonString(), item.Field("agentStatus").TextValue(), state, duration, item.Str("tool") + " " + item.Str("receiverThreadId", item.Str("newThreadId")), "ToolCollaboration"),
             "imageView" => new(type, item.Str("path"), State: state, DurationMs: duration, SummaryOverride: Path.GetFileName(item.Str("path").Replace('/', Path.DirectorySeparatorChar)), CategoryOverride: "ToolImageView"),
             "imageGeneration" or "image_generation_call" => new(type, item.GetRawText(), State: state, DurationMs: duration, SummaryOverride: item.Str("revised_prompt", item.Str("prompt")), CategoryOverride: "ToolImageGeneration"),
             "plan" => new(type, item.Str("text"), State: state, SummaryOverride: item.Str("text"), CategoryOverride: "ToolPlan"),
@@ -136,7 +137,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         var category = action.Str("type") switch { "openPage" or "open_page" => "ToolOpenPage", "findInPage" or "find_in_page" => "ToolFindInPage", _ => "ToolSearch" };
         var query = item.Str("query", action.Str("query", string.Join(" · ", action.Field("queries").Items().Select(x => x.TextValue()))));
         var summary = category == "ToolFindInPage" ? action.Str("pattern") + " · " + action.Str("url") : category == "ToolOpenPage" ? action.Str("url") : query;
-        var input = action.ValueKind == JsonValueKind.Object ? action.GetRawText() : JsonSerializer.Serialize(new { query });
+        var input = action.ValueKind == JsonValueKind.Object ? action.GetRawText() : new JsonObject { ["query"] = query }.ToJsonString();
         return new(item.Str("type"), input, item.Field("results").TextValue(), state, duration, summary, category);
     }
     private static ToolActivity Command(JsonElement item, ToolActivityState state, long? duration)

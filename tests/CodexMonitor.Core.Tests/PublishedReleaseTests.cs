@@ -23,7 +23,14 @@ public sealed class PublishedReleaseTests
                 await Task.Delay(100);
                 process.Refresh();
                 Assert.IsFalse(process.HasExited, "The published executable exited before opening its window. Check WinUI PRI/XBF publishing.");
-                if (process.MainWindowHandle != IntPtr.Zero && process.MainWindowTitle == "Codex Monitor") return;
+                if (process.MainWindowHandle != IntPtr.Zero && process.MainWindowTitle == "Codex Monitor")
+                {
+                    // NativeAOT binding or serialization failures can occur after activation, as initial data loads.
+                    await Task.Delay(TimeSpan.FromSeconds(5)); process.Refresh();
+                    Assert.IsFalse(process.HasExited, "The published executable exited while loading its initial view.");
+                    Assert.IsTrue(process.Responding, "The published window stopped responding after activation.");
+                    return;
+                }
             }
             Assert.Fail("The published executable did not activate its window. Check the published XAML resources and crash log.");
         }

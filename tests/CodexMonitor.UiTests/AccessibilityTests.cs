@@ -18,18 +18,26 @@ public sealed class AccessibilityTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
-    [DataRow("Light", "zh-CN")]
-    [DataRow("Dark", "de-DE")]
-    [DataRow("Dark", "ar-SA")]
-    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language)
+    [DataRow("Light", "zh-CN", false)]
+    [DataRow("Dark", "de-DE", false)]
+    [DataRow("Dark", "ar-SA", false)]
+    [DataRow("Dark", "zh-CN", true)]
+    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, theme, language); await window.ShowActivityReviewAsync(true);
+        ContentDialog? licenseDialog = null;
+        Windows.Foundation.IAsyncOperation<ContentDialogResult>? licenseClosing = null;
+        if (licenses)
+        {
+            licenseDialog = new ContentDialog { Title = new LocalizationService(language)["OpenSourceLicenses"], Content = new LicensePanel(new(language)), CloseButtonText = new LocalizationService(language)["Close"], XamlRoot = window.ReviewRoot.XamlRoot, RequestedTheme = window.ReviewTheme };
+            licenseClosing = licenseDialog.ShowAsync(); await MainWindow.SettleAsync();
+        }
         var directory = Path.GetFullPath(Path.Combine(MainWindow.ScreenshotDirectory, "..", "accessibility")); Directory.CreateDirectory(directory);
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
         var repo = new DirectoryInfo(AppContext.BaseDirectory);
         while (repo is not null && !File.Exists(Path.Combine(repo.FullName, "CodexMonitor.sln"))) repo = repo.Parent;
         Assert.IsNotNull(repo);
-        var scanId = $"view-{theme}-{language}";
+        var scanId = $"view-{theme}-{language}" + (licenses ? "-licenses" : "");
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in new[] { "run", "--project", Path.Combine(repo.FullName, "tests", "CodexMonitor.Accessibility"), "--", Environment.ProcessId.ToString(), handle.ToInt64().ToString(), directory, scanId }) start.ArgumentList.Add(arg);
         using var scanner = Process.Start(start)!;
@@ -45,6 +53,7 @@ public sealed class AccessibilityTests
             var file = scan.GetProperty("File").GetString(); if (file is not null && File.Exists(file)) TestContext.AddResultFile(file);
             Assert.AreEqual(0, scan.GetProperty("ErrorCount").GetInt32(), scan.GetProperty("Errors").GetRawText());
         }
+        if (licenseDialog is not null) { licenseDialog.Hide(); await licenseClosing!; }
     }
     [UITestMethod]
     [DataRow("Light", "zh-CN", false)]

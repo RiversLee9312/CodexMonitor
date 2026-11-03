@@ -9,7 +9,7 @@ internal static class ActivityIcon
 {
     internal static readonly IReadOnlyDictionary<string, string> Generated = new Dictionary<string, string>
     {
-        ["ToolMcp"] = "McpTool", ["EventMcpStatus"] = "McpTool", ["ToolDynamic"] = "CustomTool", ["ToolCollaboration"] = "AgentCollaboration",
+        ["Thinking"] = "Thinking", ["ToolMcp"] = "McpTool", ["EventMcpStatus"] = "McpTool", ["ToolDynamic"] = "CustomTool", ["ToolCollaboration"] = "AgentCollaboration",
         ["ToolCompaction"] = "ContextCompaction", ["EventHook"] = "LifecycleHook", ["ToolImageGeneration"] = "ImageGeneration",
         ["ToolFindInPage"] = "FindInPage", ["EventUsage"] = "TokenUsage", ["EventLimits"] = "TokenUsage"
     };

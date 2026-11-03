@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace CodexMonitor.App;
 
-internal sealed class HomeDiscoveryPanel : StackPanel, IDisposable
+internal sealed partial class HomeDiscoveryPanel : StackPanel, IDisposable
 {
     private readonly ICodexHomeDiscovery _discovery;
     private readonly LocalizationService _text;

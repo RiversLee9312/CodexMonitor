@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "展開以檢視參數與結果。按 Enter 或空白鍵即可展開或摺疊。",
   "RawDataHelp": "未識別的內容會以原始資料保留在此處。",
   "NewSessionsAvailable": "新增 {0} 個工作階段",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "思考",
+  "OpenSourceLicenses": "開放原始碼授權",
+  "Components": "元件",
+  "License": "授權",
+  "Notices": "聲明"
 }

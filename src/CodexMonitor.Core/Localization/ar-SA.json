@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "وسّع لقراءة المعلمات والنتائج. اضغط Enter أو Space للتبديل بين التوسيع والطي.",
   "RawDataHelp": "يتم الاحتفاظ بالمحتوى غير المعروف هنا كبيانات أصلية.",
   "NewSessionsAvailable": "{0} جلسات جديدة",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "جارٍ التفكير",
+  "OpenSourceLicenses": "تراخيص البرامج مفتوحة المصدر",
+  "Components": "المكوّنات",
+  "License": "الترخيص",
+  "Notices": "الإشعارات"
 }

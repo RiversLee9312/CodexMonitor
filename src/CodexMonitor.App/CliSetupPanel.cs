@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace CodexMonitor.App;
 
-internal sealed class CliSetupPanel : StackPanel, IDisposable
+internal sealed partial class CliSetupPanel : StackPanel, IDisposable
 {
     public static readonly Uri InstallationUri = new("https://learn.chatgpt.com/docs/cli");
     private readonly LocalizationService _text;

@@ -192,6 +192,7 @@ public sealed class SessionConnectionUiTests
         Notify("item/completed", new { threadId = "review-session", item = new { id = "stream-command", type = "commandExecution", command = "dotnet test", status = "completed", aggregatedOutput = "final", exitCode = 0 } });
         var last = window.ReviewMessageRows.Last(); Assert.HasCount(2, last.Activities);
         Assert.AreEqual("Checking the server.", last.Activities[0].Text); Assert.AreEqual("final", last.Activities[1].Tool?.Output);
+        Assert.AreEqual("PRIVATE RAW REASONING", last.Activities[0].Reasoning?.FullText);
         Assert.AreEqual(ToolActivityState.Completed, last.Activities[1].Tool?.State);
     }
     [UITestMethod]

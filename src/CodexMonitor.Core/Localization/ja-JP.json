@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "展開してパラメーターと結果を確認します。Enter または Space キーで展開・折りたたみを切り替えます。",
   "RawDataHelp": "認識されない内容は元のデータとしてここに保持されます。",
   "NewSessionsAvailable": "新しいセッション {0} 件",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "思考中",
+  "OpenSourceLicenses": "オープンソースライセンス",
+  "Components": "コンポーネント",
+  "License": "ライセンス",
+  "Notices": "通知"
 }

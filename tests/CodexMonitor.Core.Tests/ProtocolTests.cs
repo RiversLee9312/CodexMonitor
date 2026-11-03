@@ -38,7 +38,7 @@ public sealed class ProtocolTests
     public async Task ConcurrentResponsesAreMatchedByIdRatherThanArrivalOrder()
     {
         var transport = new FakeTransport(); await using var rpc = new JsonRpcClient(transport);
-        var first = rpc.RequestAsync("a", new { }); var second = rpc.RequestAsync("b", new { });
+        var first = rpc.RequestAsync("a", new System.Text.Json.Nodes.JsonObject()); var second = rpc.RequestAsync("b", new System.Text.Json.Nodes.JsonObject());
         var requestA = await transport.SentAsync(); var requestB = await transport.SentAsync();
         transport.Reply(requestB, new { text = "B" }); transport.Reply(requestA, new { text = "A" });
         Assert.AreEqual("A", (await first).Str("text")); Assert.AreEqual("B", (await second).Str("text"));
@@ -47,7 +47,7 @@ public sealed class ProtocolTests
     public async Task DisconnectFailsPendingRequestsPromptly()
     {
         var transport = new FakeTransport(); await using var rpc = new JsonRpcClient(transport);
-        var pending = rpc.RequestAsync("a", new { }); await transport.SentAsync(); transport.Incoming.Writer.TryComplete();
+        var pending = rpc.RequestAsync("a", new System.Text.Json.Nodes.JsonObject()); await transport.SentAsync(); transport.Incoming.Writer.TryComplete();
         await Assert.ThrowsAsync<IOException>(() => pending);
         Assert.IsFalse(rpc.IsConnected);
     }
@@ -56,17 +56,17 @@ public sealed class ProtocolTests
     {
         var transport = new FakeTransport(); await using var rpc = new JsonRpcClient(transport);
         using var cancelled = new CancellationTokenSource();
-        var pending = rpc.RequestAsync("a", new { }, cancelled.Token); var stale = await transport.SentAsync(); cancelled.Cancel();
+        var pending = rpc.RequestAsync("a", new System.Text.Json.Nodes.JsonObject(), cancelled.Token); var stale = await transport.SentAsync(); cancelled.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => pending);
-        transport.Reply(stale, new { });
-        var next = rpc.RequestAsync("b", new { }); var current = await transport.SentAsync(); transport.Reply(current, new { ok = true });
+        transport.Reply(stale, new System.Text.Json.Nodes.JsonObject());
+        var next = rpc.RequestAsync("b", new System.Text.Json.Nodes.JsonObject()); var current = await transport.SentAsync(); transport.Reply(current, new { ok = true });
         Assert.IsTrue((await next).Field("ok").GetBoolean());
     }
     [TestMethod]
     public async Task RpcErrorsPreserveCodeAndMessage()
     {
         var transport = new FakeTransport(); await using var rpc = new JsonRpcClient(transport);
-        var pending = rpc.RequestAsync("a", new { }); var request = await transport.SentAsync();
+        var pending = rpc.RequestAsync("a", new System.Text.Json.Nodes.JsonObject()); var request = await transport.SentAsync();
         transport.Incoming.Writer.TryWrite(JsonSerializer.Serialize(new { id = request.Field("id"), error = new { code = -32602, message = "Turn mismatch" } }));
         var error = await Assert.ThrowsAsync<RpcException>(() => pending); Assert.AreEqual(-32602, error.Code); Assert.AreEqual("Turn mismatch", error.Message);
     }

@@ -92,7 +92,7 @@
               <Button x:Name="SetupCodexButton" HorizontalAlignment="Center" Visibility="Collapsed" Click="OnSetupCodex"/>
             </StackPanel>
             <Grid x:Name="Conversation" Visibility="Collapsed">
-              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid x:Name="FindPanel" Visibility="Collapsed" Margin="24,0,24,12" ColumnSpacing="8">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBox x:Name="TranscriptSearch" TextChanged="OnTranscriptSearchChanged" MinHeight="40"/>
@@ -101,14 +101,17 @@
               <Grid Grid.Row="1">
                 <ListView x:Name="MessageList" Background="Transparent" SelectionMode="None" IsItemClickEnabled="False" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                   <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
-                  <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></ListView.ItemContainerStyle>
+                  <ListView.ItemContainerStyle><Style TargetType="ListViewItem" x:DataType="local:EntryRow"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></ListView.ItemContainerStyle>
                   <ListView.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></ListView.ItemTemplate>
                 </ListView>
                 <TextBlock x:Name="NoMessagesText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                <Button x:Name="LatestButton" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,16" Width="40" Height="40" MinWidth="40" MinHeight="40" CornerRadius="20" Padding="0" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1" Visibility="Collapsed" Opacity="0" Click="OnLatest">
+                  <Button.RenderTransform><TranslateTransform x:Name="LatestTranslation" Y="6"/></Button.RenderTransform>
+                  <FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE74B;" FontSize="20"/>
+                </Button>
               </Grid>
-              <Button x:Name="LatestButton" Grid.Row="2" HorizontalAlignment="Right" Margin="24,0,24,8" Visibility="Collapsed" Click="OnLatest"/>
-              <Border x:Name="SessionFooter" Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,16,24,18">
+              <Border x:Name="SessionFooter" Grid.Row="2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,16,24,18">
                 <Grid MaxWidth="920" RowSpacing="12">
                   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                   <TextBox x:Name="Composer" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextChanged="OnComposerChanged"/>

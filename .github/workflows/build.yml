@@ -19,6 +19,9 @@ jobs:
       - name: Build Release and MSI
         shell: pwsh
         run: ./scripts/Build-Installer.ps1
+      - name: Validate published executable
+        shell: pwsh
+        run: ./scripts/Test.ps1 -IncludeRelease
       - uses: actions/upload-artifact@v4
         if: always()
         with:

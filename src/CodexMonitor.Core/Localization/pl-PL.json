@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Rozwiń, aby odczytać parametry i wyniki. Naciśnij Enter lub spację, aby rozwinąć lub zwinąć.",
   "RawDataHelp": "Nierozpoznana zawartość jest tutaj zachowywana jako oryginalne dane.",
   "NewSessionsAvailable": "{0} nowe sesje",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Myśli",
+  "OpenSourceLicenses": "Licencje open source",
+  "Components": "Komponenty",
+  "License": "Licencja",
+  "Notices": "Informacje"
 }

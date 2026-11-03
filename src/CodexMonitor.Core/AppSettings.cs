@@ -14,14 +14,14 @@ public sealed record AppSettings
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexMonitor", "settings.json");
     public static AppSettings Load()
     {
-        try { return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath)) ?? new(); }
+        try { return JsonSerializer.Deserialize(File.ReadAllText(SettingsPath), CoreJsonContext.Default.AppSettings) ?? new(); }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
     }
     public void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
         var temp = SettingsPath + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(temp, JsonSerializer.Serialize(this, CoreJsonContext.Default.AppSettings));
         File.Move(temp, SettingsPath, true);
     }
 }

@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Perluas untuk membaca parameter dan hasil. Tekan Enter atau Space untuk membuka atau menutup.",
   "RawDataHelp": "Konten yang tidak dikenali disimpan di sini sebagai data asli.",
   "NewSessionsAvailable": "{0} sesi baru",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Berpikir",
+  "OpenSourceLicenses": "Lisensi sumber terbuka",
+  "Components": "Komponen",
+  "License": "Lisensi",
+  "Notices": "Pemberitahuan"
 }

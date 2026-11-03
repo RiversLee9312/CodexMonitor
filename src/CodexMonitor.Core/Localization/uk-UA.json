@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Розгорніть, щоб прочитати параметри та результати. Натисніть Enter або пробіл, щоб розгорнути чи згорнути.",
   "RawDataHelp": "Нерозпізнаний вміст зберігається тут як вихідні дані.",
   "NewSessionsAvailable": "{0} нових сесій",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Міркує",
+  "OpenSourceLicenses": "Ліцензії з відкритим кодом",
+  "Components": "Компоненти",
+  "License": "Ліцензія",
+  "Notices": "Повідомлення"
 }

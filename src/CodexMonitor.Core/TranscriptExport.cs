@@ -19,6 +19,10 @@ public static class TranscriptExport
                 b.AppendLine(fence).AppendLine(entry.Text).AppendLine(fence);
             }
             else b.AppendLine(entry.Text);
+            if (entry.Reasoning is { Summary.Length: > 0, FullText.Length: > 0 } reasoning)
+            {
+                b.AppendLine().Append("### ").AppendLine(text["Thinking"]).AppendLine().AppendLine(reasoning.FullText);
+            }
             b.AppendLine();
         }
         return b.ToString();

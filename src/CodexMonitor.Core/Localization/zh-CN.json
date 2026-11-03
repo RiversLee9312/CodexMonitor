@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "展开查看参数和结果。按 Enter 或空格键展开或折叠。",
   "RawDataHelp": "未识别的内容以原始数据保留在此处。",
   "NewSessionsAvailable": "新增 {0} 个会话",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "思考",
+  "OpenSourceLicenses": "开源许可证",
+  "Components": "组件",
+  "License": "许可证",
+  "Notices": "声明"
 }

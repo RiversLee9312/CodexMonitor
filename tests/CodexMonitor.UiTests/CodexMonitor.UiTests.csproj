@@ -8,10 +8,14 @@
     <UseWinUI>true</UseWinUI><WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained><SelfContained>true</SelfContained>
     <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>..\..\src\CodexMonitor.App\app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5"/>
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.5"/>
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.6.5"/>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.MSIX" Version="1.7.251221100" PrivateAssets="all"/>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.3.1" PrivateAssets="all"/>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654"/>
     <ProjectReference Include="..\..\src\CodexMonitor.Core\CodexMonitor.Core.csproj"/>
     <!-- Compile the production view and styles, rather than a replica used only by tests. -->
@@ -20,6 +24,7 @@
     <Compile Include="..\..\src\CodexMonitor.App\ActivityDetails.cs" Link="ActivityDetails.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ActivityIcon.cs" Link="ActivityIcon.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\AccessibilitySupport.cs" Link="AccessibilitySupport.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\LicensePanel.cs" Link="LicensePanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ServerDiscoveryPanel.cs" Link="ServerDiscoveryPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\HomeDiscoveryPanel.cs" Link="HomeDiscoveryPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\CliSetupPanel.cs" Link="CliSetupPanel.cs"/>

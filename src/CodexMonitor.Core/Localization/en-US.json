@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Expand to read parameters and results. Press Enter or Space to toggle.",
   "RawDataHelp": "Unrecognized content is preserved here as original data.",
   "NewSessionsAvailable": "{0} new sessions",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Thinking",
+  "OpenSourceLicenses": "Open-source licenses",
+  "Components": "Components",
+  "License": "License",
+  "Notices": "Notices"
 }

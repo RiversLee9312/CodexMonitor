@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Udvid for at læse parametre og resultater. Tryk på Enter eller mellemrum for at skifte.",
   "RawDataHelp": "Ikke-genkendt indhold bevares her som originale data.",
   "NewSessionsAvailable": "{0} nye sessioner",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Tænker",
+  "OpenSourceLicenses": "Open source-licenser",
+  "Components": "Komponenter",
+  "License": "Licens",
+  "Notices": "Meddelelser"
 }

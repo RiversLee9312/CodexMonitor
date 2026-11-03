@@ -57,7 +57,13 @@ public sealed partial class MainWindow : Window
     private bool _cliMissing;
     private string? _availabilityAnnouncement;
     private bool _readingActivityHistory;
+    private bool _latestVisible;
+    private Storyboard? _latestTransition;
     private long _selectedLength = -1;
+    private long _transcriptReadGeneration;
+    private ServerRead? _serverRead;
+    private sealed record ServerRead(CodexClient Client, string SessionId, long Generation, List<RpcMessage> Messages);
+    private Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
     private readonly Microsoft.UI.System.ThemeSettings _themeSettings;
 
     public MainWindow() : this(false) { }
@@ -157,7 +163,7 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetAcceleratorKey(SettingsButton, "Ctrl+,"); AutomationProperties.SetAcceleratorKey(RefreshButton, "F5");
         AutomationProperties.SetAcceleratorKey(SendButton, "Ctrl+Enter");
         DetailsMenu.Text = _text["Details"]; ExportMenu.Text = _text["Export"]; OpenFolderMenu.Text = _text["OpenFolder"];
-        LatestButton.Content = _text["JumpToLatest"];
+        Label(LatestButton, "JumpToLatest");
         Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessageInput"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
         NoSessionsTitle.Text = _text["NoSessions"]; NoSessionsHint.Text = _text["NoSessionsHint"];
@@ -229,20 +235,25 @@ public sealed partial class MainWindow : Window
                 try
                 {
                     var live = await client.ListAsync(_lifetime.Token);
-                    if (!ReferenceEquals(client, _client)) return;
+                    if (!ReferenceEquals(client, _client) || !client.IsConnected) return;
                     var merged = local.ToDictionary(x => x.Id);
                     foreach (var item in live)
                     {
                         if (item.IsLive) _sessionConnectionFailures.Remove(item.Id);
                         if (merged.TryGetValue(item.Id, out var disk)) merged[item.Id] = item with
                         { FilePath = disk.FilePath, Title = string.IsNullOrEmpty(item.Title) ? disk.Title : item.Title, ParentId = item.ParentId ?? disk.ParentId, Model = disk.Model,
-                            State = item.State == SessionState.Unknown ? disk.State : item.State, FileVersion = disk.FileVersion };
+                            State = item.State == SessionState.Unknown && !_attached.Contains(item.Id) ? disk.State : item.State, FileVersion = disk.FileVersion };
                         else merged[item.Id] = item;
                     }
                     _sessions = merged.Values.OrderByDescending(x => x.UpdatedAt).ToArray();
                 }
                 catch (Exception e) when (e is IOException or RpcException or OperationCanceledException)
-                { _sessions = local; if (force) NoticeText("ReadFailed", InfoBarSeverity.Warning); }
+                {
+                    var retained = local.ToDictionary(s => s.Id);
+                    foreach (var attached in _sessions.Where(s => _attached.Contains(s.Id))) retained[attached.Id] = attached;
+                    _sessions = retained.Values.OrderByDescending(s => s.UpdatedAt).ToArray();
+                    if (force) NoticeText("ReadFailed", InfoBarSeverity.Warning);
+                }
             }
             else _sessions = local;
             ApplyFilter(force);
@@ -251,10 +262,12 @@ public sealed partial class MainWindow : Window
                 var updated = _sessions.FirstOrDefault(x => x.Id == selected.Id);
                 if (updated is not null)
                 {
-                    _selected = updated with { ActiveTurnId = updated.ActiveTurnId ?? (_attached.Contains(updated.Id) ? selected.ActiveTurnId : null) };
+                    _selected = updated with { ActiveTurnId = updated.ActiveTurnId ?? (_attached.Contains(updated.Id) && updated.State is SessionState.Active or SessionState.Waiting ? selected.ActiveTurnId : null) };
                     UpdateTitle(); UpdateChrome();
                     var length = File.Exists(updated.FilePath) ? new FileInfo(updated.FilePath).Length : -1;
-                    if (!string.IsNullOrEmpty(updated.FilePath) && (length != _selectedLength || force)) await LoadTranscriptAsync(_selected, false);
+                    if (_client is { IsConnected: true } && _attached.Contains(updated.Id))
+                    { if (force) await LoadTranscriptAsync(_selected, false); }
+                    else if (!string.IsNullOrEmpty(updated.FilePath) && (length != _selectedLength || force)) await LoadTranscriptAsync(_selected, false);
                     await CheckSessionAvailabilityAsync(force);
                 }
             }
@@ -325,32 +338,51 @@ public sealed partial class MainWindow : Window
         await LoadTranscriptAsync(_selected, true);
         await availability;
     }
-    private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading)
+    private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading, IReadOnlyList<RpcMessage>? initialNotifications = null)
     {
+        var generation = ++_transcriptReadGeneration;
         _selectionCts?.Cancel(); _selectionCts?.Dispose();
         var cts = _selectionCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         if (showLoading) { _messages.Clear(); LoadingRing.IsActive = true; LoadingRing.Visibility = Visibility.Visible; }
         try
         {
             TranscriptSnapshot snapshot;
-            if (File.Exists(session.FilePath))
+            var sourceClient = _client is { IsConnected: true } connected && (_attached.Contains(session.Id) || !File.Exists(session.FilePath)) ? connected : null;
+            ServerRead? reading = null; ServerTranscript? serverSnapshot = null;
+            if (sourceClient is not null)
+            {
+                reading = _serverRead = new(sourceClient, session.Id, generation, initialNotifications?.ToList() ?? new List<RpcMessage>());
+                serverSnapshot = await sourceClient.ReadTranscriptStateAsync(session.Id, cts.Token);
+                snapshot = new(session, serverSnapshot.Entries);
+                if (!ReferenceEquals(sourceClient, _client) || !sourceClient.IsConnected) return;
+            }
+            else if (File.Exists(session.FilePath))
             {
                 var initialLength = new FileInfo(session.FilePath).Length;
-                snapshot = await Task.Run(() => new TranscriptParser().ReadAsync(session, cts.Token), cts.Token);
-                if (_selected?.Id != session.Id || cts.IsCancellationRequested) return;
+                snapshot = await Task.Run(() => _readLocalTranscript(session, cts.Token), cts.Token);
+                if (_selected?.Id != session.Id || cts.IsCancellationRequested || generation != _transcriptReadGeneration || _client is { IsConnected: true } && _attached.Contains(session.Id)) return;
                 _selectedLength = initialLength;
-                if (session.IsLive) snapshot = snapshot with { Session = session };
+                if (session.IsLive && _client is { IsConnected: true }) snapshot = snapshot with { Session = session };
             }
-            else if (_client is { IsConnected: true }) snapshot = new(session, await _client.ReadTranscriptAsync(session.Id, cts.Token));
             else throw new IOException("Rollout file unavailable");
-            if (_selected?.Id != session.Id || cts.IsCancellationRequested) return;
+            if (_selected?.Id != session.Id || cts.IsCancellationRequested || generation != _transcriptReadGeneration) return;
             _snapshot = snapshot; _selected = snapshot.Session;
+            if (reading is not null && ReferenceEquals(_serverRead, reading))
+            {
+                _serverRead = null;
+                foreach (var notification in reading.Messages.Where(serverSnapshot!.ShouldReplay)) HandleMessage(reading.Client, notification);
+            }
             RenderMessages(showLoading); UpdateTitle(); UpdateChrome();
             if (snapshot.InvalidRecords > 0) NoticeText("ReadWarnings", InfoBarSeverity.Warning, _text.Number(snapshot.InvalidRecords));
         }
         catch (OperationCanceledException) { }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException) { if (_selected?.Id == session.Id) NoticeText("ReadFailed", InfoBarSeverity.Error); }
-        finally { if (_selectionCts == cts) { LoadingRing.IsActive = false; LoadingRing.Visibility = Visibility.Collapsed; } }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException)
+        { if (_selected?.Id == session.Id && generation == _transcriptReadGeneration && !cts.IsCancellationRequested) NoticeText("ReadFailed", InfoBarSeverity.Error); }
+        finally
+        {
+            if (_serverRead?.Generation == generation) _serverRead = null;
+            if (_selectionCts == cts) { LoadingRing.IsActive = false; LoadingRing.Visibility = Visibility.Collapsed; }
+        }
     }
     private void RenderMessages(bool reset = false)
     {
@@ -359,7 +391,7 @@ public sealed partial class MainWindow : Window
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var viewingId = _selected?.Id;
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
-            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; LatestButton.Visibility = Visibility.Visible; } }, () => _following);
+            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following);
         // Virtualized ListView keeps the entire transcript accessible without an artificial history cutoff.
         if (reset) _messages.Clear();
         // Replace only changed rows. Rebuilding the tail discards virtualized scroll anchors.
@@ -370,6 +402,11 @@ public sealed partial class MainWindow : Window
         for (int i = common; i < rows.Count; i++) _messages.Add(rows[i]);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            TrackTranscriptScroll();
+            if (_messageScroll is not null) SetLatestVisible(_readingActivityHistory || !_following && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset >= 24);
+        });
     }
     private void UpdateTitle()
     {
@@ -416,14 +453,14 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(SessionConnectButton, attached && !needsTurn ? _connectionEndpoint ?? _text["SessionConnected"] : _text["ConnectSessionHint"]);
         var active = _selected?.State is SessionState.Active or SessionState.Waiting;
         var canSteer = active && !string.IsNullOrEmpty(_selected?.ActiveTurnId);
-        Composer.IsEnabled = attached && (!active || canSteer) && !_sending;
+        Composer.IsEnabled = attached && _selected?.IsLive == true && (!active || canSteer) && !_sending;
         SendButton.IsEnabled = Composer.IsEnabled && !string.IsNullOrWhiteSpace(Composer.Text);
         SendButton.Content = _text[canSteer ? "Steer" : "Send"];
         StopButton.Visibility = attached && canSteer ? Visibility.Visible : Visibility.Collapsed;
         StopButton.IsEnabled = !_sending;
         ResumeButton.IsEnabled = !_sending && !_connecting && !_findingSessionServer && showResume;
         ToolTipService.SetToolTip(ResumeButton, _text["RestoreSessionExplanation"]);
-        ComposerHint.Text = _text[active && !canSteer ? "RuntimeTurnUnavailable" : canSteer ? "SteerHint" : "SendHint"];
+        ComposerHint.Text = _text[attached && _selected?.IsLive != true || active && !canSteer ? "RuntimeTurnUnavailable" : canSteer ? "SteerHint" : "SendHint"];
         AutomationProperties.SetHelpText(Composer, ComposerHint.Text);
         if (actionHadFocus && !Composer.IsEnabled && !ResumeButton.IsEnabled && SessionConnectButton.Visibility != Visibility.Visible)
             MoreButton.Focus(FocusState.Programmatic);
@@ -441,7 +478,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var wasConnected = _client is { IsConnected: true };
-            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); }
+            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); InvalidateTranscriptRead(); await old.DisposeAsync(); }
             if (!wasConnected)
             {
                 if (!_settings.UseSharedServer) _resolveExecutable(_settings.Executable);
@@ -454,6 +491,7 @@ public sealed partial class MainWindow : Window
             }
             _connectionEndpoint = _settings.UseSharedServer ? _settings.Endpoint : null;
             Notice.IsOpen = false; await RefreshAsync(true);
+            if (wasConnected && _selected is { } localSession && File.Exists(localSession.FilePath)) await LoadTranscriptAsync(localSession, false);
         }
         catch (FileNotFoundException) when (!_settings.UseSharedServer)
         { await ShowCliSetupAsync(); }
@@ -522,11 +560,17 @@ public sealed partial class MainWindow : Window
     private void ObserveClient(CodexClient client)
     {
         client.Rpc.Message += message => DispatcherQueue.TryEnqueue(() => HandleMessage(client, message));
-        client.Rpc.Disconnected += _ => DispatcherQueue.TryEnqueue(() =>
+        client.Rpc.Disconnected += _ => DispatcherQueue.TryEnqueue(async () =>
         {
-            if (!_closing && ReferenceEquals(_client, client)) { _attached.Clear(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning); }
+            if (!_closing && ReferenceEquals(_client, client))
+            {
+                _attached.Clear(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
+                if (_selected is { } session && File.Exists(session.FilePath)) await LoadTranscriptAsync(session, false);
+            }
         });
     }
+    private void InvalidateTranscriptRead()
+    { ++_transcriptReadGeneration; _selectionCts?.Cancel(); _serverRead = null; }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;
@@ -536,6 +580,7 @@ public sealed partial class MainWindow : Window
         var ct = cancellation.Token; _findingSessionServer = true; UpdateChrome();
         _sessionConnectionFailures.Remove(session.Id); Notice.IsOpen = false; UpdateChrome();
         CodexClient? next = null;
+        var joiningMessages = new List<RpcMessage>();
         try
         {
             var client = _client;
@@ -559,7 +604,6 @@ public sealed partial class MainWindow : Window
                 if (!(await client.LoadedThreadIdsAsync(ct)).Contains(session.Id)) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
                 var runtime = await client.RuntimeAsync(session.Id, ct);
                 if (!runtime.IsLive) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
-                var joiningMessages = new List<RpcMessage>();
                 Action<RpcMessage> duringJoin = message => DispatcherQueue.TryEnqueue(() =>
                 {
                     if (ReferenceEquals(_client, client)) HandleMessage(client, message); else joiningMessages.Add(message);
@@ -572,7 +616,6 @@ public sealed partial class MainWindow : Window
                 _connectionEndpoint = match.Server.Endpoint;
                 if (old is not null) await old.DisposeAsync();
                 ApplyAttachedSession(session, joined);
-                foreach (var message in joiningMessages) HandleMessage(client, message);
             }
             else
             {
@@ -581,7 +624,7 @@ public sealed partial class MainWindow : Window
                 ApplyAttachedSession(session, await client.WithActiveTurnAsync(await client.ResumeAsync(session.Id, ct), ct));
             }
             Notice.IsOpen = false;
-            if (_selected?.Id == session.Id) { await LoadTranscriptAsync(_selected, false); Composer.Focus(FocusState.Programmatic); }
+            if (_selected?.Id == session.Id) { await LoadTranscriptAsync(_selected, false, joiningMessages); Composer.Focus(FocusState.Programmatic); }
         }
         catch (OperationCanceledException) { if (!_lifetime.IsCancellationRequested && _selected?.Id == session.Id) SetSessionConnectionFailure(session.Id, "SessionServerLookupFailed"); }
         catch (Exception e) when (e is IOException or RpcException or ArgumentException or System.Net.WebSockets.WebSocketException or System.Net.Sockets.SocketException)
@@ -595,12 +638,13 @@ public sealed partial class MainWindow : Window
     private void SetSessionConnectionFailure(string id, string key) => _sessionConnectionFailures[id] = key;
     private void ApplyAttachedSession(SessionInfo original, SessionInfo runtime)
     {
+        InvalidateTranscriptRead();
         _sessionConnectionFailures.Remove(original.Id);
         _sessionServerCheckedAt[original.Id] = DateTimeOffset.UtcNow;
         _attached.Add(original.Id);
         var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = original.Model, FileVersion = original.FileVersion };
         _sessions = _sessions.Select(s => s.Id == original.Id ? joined : s).ToArray();
-        if (_selected?.Id == original.Id) _selected = joined;
+        if (_selected?.Id == original.Id) { _selected = joined; _snapshot = new(joined, Array.Empty<TranscriptEntry>()); }
         ApplyFilter();
     }
     private async Task ResumeAsync()
@@ -621,11 +665,9 @@ public sealed partial class MainWindow : Window
             if (_selected?.Id != session.Id) return;
             if (!SessionConnectionPolicy.CanResume(session)) { UpdateCheckedSession(session); connectInstead = true; return; }
             var result = await client.WithActiveTurnAsync(await client.ResumeAsync(session.Id, _lifetime.Token), _lifetime.Token);
-            _sessionConnectionFailures.Remove(session.Id);
-            _attached.Add(session.Id);
+            ApplyAttachedSession(session, result);
             if (_selected?.Id == session.Id)
             {
-                _selected = result with { FilePath = session.FilePath, Title = session.Title, ParentId = session.ParentId, Model = session.Model };
                 await LoadTranscriptAsync(_selected, false); Composer.Focus(FocusState.Programmatic);
             }
         }
@@ -682,12 +724,14 @@ public sealed partial class MainWindow : Window
     }
     private void HandleMessage(CodexClient client, RpcMessage message)
     {
-        if (!ReferenceEquals(client, _client) || _closing) return;
+        if (!ReferenceEquals(client, _client) || _closing || !client.IsConnected) return;
         if (message.Id is not null) { _ = HandleRequestAsync(client, message); return; }
         var p = message.Parameters;
         UpdateSessionActivity(message);
         var threadId = p.Str("threadId");
-        if (_selected is null || threadId != _selected.Id && !(threadId.Length == 0 && message.Method is "warning" or "configWarning" or "account/rateLimits/updated")) return;
+        if (_selected is null || !_attached.Contains(_selected.Id) || threadId != _selected.Id && !(threadId.Length == 0 && message.Method is "warning" or "configWarning" or "account/rateLimits/updated")) return;
+        if (_serverRead is { } reading && ReferenceEquals(reading.Client, client) && reading.SessionId == threadId)
+        { reading.Messages.Add(message); return; }
         if (message.Method == "model/safetyBuffering/updated" && p.Field("showBufferingUi").ValueKind == JsonValueKind.False && _snapshot is not null)
         { _snapshot = _snapshot with { Entries = _snapshot.Entries.Where(e => e.Tool?.CategoryKey != "EventBuffering").ToArray() }; RenderMessages(); }
         if (TranscriptEvents.Parse(message.Method, p, DateTimeOffset.Now) is { } activity) UpsertTranscriptEntry(activity);
@@ -706,17 +750,21 @@ public sealed partial class MainWindow : Window
                 else list[at] = list[at] with { Text = list[at].Text + p.Str("delta") };
                 _snapshot = _snapshot with { Entries = list }; RenderMessages(); break;
             case "item/reasoning/summaryTextDelta":
+            case "item/reasoning/textDelta":
                 var summaryId = p.Str("itemId");
                 if (_snapshot is null) _snapshot = new(_selected, []);
                 var summaries = _snapshot.Entries.ToList(); var summaryAt = summaries.FindIndex(e => e.Id == summaryId);
-                if (summaryAt < 0) summaries.Add(new(summaryId, EntryKind.Reasoning, p.Str("delta"), DateTimeOffset.Now));
-                else summaries[summaryAt] = summaries[summaryAt] with { Text = summaries[summaryAt].Text + p.Str("delta") };
+                var prior = summaryAt < 0 ? null : summaries[summaryAt];
+                var reasoning = prior?.Reasoning ?? new ReasoningContent(prior?.Text ?? "", "");
+                reasoning = message.Method == "item/reasoning/summaryTextDelta" ? reasoning with { Summary = reasoning.Summary + p.Str("delta") } : reasoning with { FullText = reasoning.FullText + p.Str("delta") };
+                var updatedReasoning = new TranscriptEntry(summaryId, EntryKind.Reasoning, reasoning.DisplayText, prior?.Timestamp ?? DateTimeOffset.Now, Reasoning: reasoning);
+                if (summaryAt < 0) summaries.Add(updatedReasoning); else summaries[summaryAt] = updatedReasoning;
                 _snapshot = _snapshot with { Entries = summaries }; RenderMessages(); break;
             case "item/reasoning/summaryPartAdded":
                 if (_snapshot is null) break;
                 var parts = _snapshot.Entries.ToList(); var partAt = parts.FindIndex(e => e.Id == p.Str("itemId"));
-                if (partAt >= 0 && parts[partAt].Text.Length > 0 && !parts[partAt].Text.EndsWith('\n'))
-                { parts[partAt] = parts[partAt] with { Text = parts[partAt].Text + "\n\n" }; _snapshot = _snapshot with { Entries = parts }; RenderMessages(); }
+                if (partAt >= 0 && parts[partAt].Reasoning is { Summary.Length: > 0 } part && !part.Summary.EndsWith('\n'))
+                { part = part with { Summary = part.Summary + "\n\n" }; parts[partAt] = parts[partAt] with { Text = part.DisplayText, Reasoning = part }; _snapshot = _snapshot with { Entries = parts }; RenderMessages(); }
                 break;
             case "item/plan/delta":
                 var planId = p.Str("itemId");
@@ -771,7 +819,7 @@ public sealed partial class MainWindow : Window
             _sessions = _sessions.Select(s => s.Id == id ? changed : s).ToArray();
             row.Update(changed, _text, true, _selected?.Id == id);
         }
-        if (message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/plan/delta" or "item/started" or "item/completed" or
+        if (message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/reasoning/textDelta" or "item/plan/delta" or "item/started" or "item/completed" or
             "turn/plan/updated" or "turn/diff/updated" or "error" or "warning") row.MarkUpdated(_selected?.Id == id);
     }
     private async Task HandleRequestAsync(CodexClient client, RpcMessage message)
@@ -787,7 +835,7 @@ public sealed partial class MainWindow : Window
                 var requestedItem = _selected?.Id == p.Str("threadId") ? _snapshot?.Entries.FirstOrDefault(x => x.Id == p.Str("itemId")) : null;
                 content.Children.Add(new TextBlock { Text = (requestedItem is null ? "" : requestedItem.Text + "\n\n") + p.GetRawText(), IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FlowDirection = FlowDirection.LeftToRight });
                 var result = await ShowDialogAsync(new ContentDialog { Title = _text["ApprovalTitle"], Content = new ScrollViewer { Content = content, MaxHeight = 400 }, PrimaryButtonText = _text["Approve"], CloseButtonText = _text["Decline"], DefaultButton = ContentDialogButton.Close });
-                await client.Rpc.RespondAsync(message.Id!.Value, new { decision = result == ContentDialogResult.Primary ? "accept" : "decline" }, _lifetime.Token);
+                await client.Rpc.RespondAsync(message.Id!.Value, new System.Text.Json.Nodes.JsonObject { ["decision"] = result == ContentDialogResult.Primary ? "accept" : "decline" }, _lifetime.Token);
             }
             else
             {
@@ -798,14 +846,38 @@ public sealed partial class MainWindow : Window
         catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException) { }
     }
     private void OnMessageListLoaded(object sender, RoutedEventArgs e)
+        => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TrackTranscriptScroll);
+    private void TrackTranscriptScroll()
     {
-        _messageScroll = FindVisual<ScrollViewer>(MessageList);
-        if (_messageScroll is not null) _messageScroll.ViewChanged += (_, args) =>
-        {
-            if (args.IsIntermediate) return;
-            _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 80;
-            LatestButton.Visibility = _following ? Visibility.Collapsed : Visibility.Visible;
-        };
+        var scroll = FindVisual<ScrollViewer>(MessageList);
+        if (ReferenceEquals(scroll, _messageScroll)) return;
+        if (_messageScroll is not null) _messageScroll.ViewChanged -= OnTranscriptViewChanged;
+        _messageScroll = scroll;
+        if (_messageScroll is not null) _messageScroll.ViewChanged += OnTranscriptViewChanged;
+    }
+    private void OnTranscriptViewChanged(object? sender, ScrollViewerViewChangedEventArgs args)
+    {
+        if (args.IsIntermediate || _messageScroll is null) return;
+        _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
+        SetLatestVisible(!_following);
+    }
+    private void SetLatestVisible(bool visible)
+    {
+        if (_latestVisible == visible) return;
+        var opacity = LatestButton.Opacity; var offset = LatestTranslation.Y;
+        _latestVisible = visible; _latestTransition?.Stop(); LatestButton.Opacity = opacity; LatestTranslation.Y = offset;
+        LatestButton.IsHitTestVisible = visible; LatestButton.IsTabStop = visible;
+        if (!visible && AccessibilitySupport.ContainsFocus(LatestButton)) MessageList.Focus(FocusState.Programmatic);
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled || !Root.IsLoaded)
+        { LatestButton.Opacity = visible ? 1 : 0; LatestTranslation.Y = visible ? 0 : 6; LatestButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed; return; }
+        LatestButton.Visibility = Visibility.Visible;
+        var fade = new DoubleAnimation { From = LatestButton.Opacity, To = visible ? 1 : 0, Duration = TimeSpan.FromMilliseconds(120) };
+        var slide = new DoubleAnimation { From = LatestTranslation.Y, To = visible ? 0 : 6, Duration = TimeSpan.FromMilliseconds(120), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        Storyboard.SetTarget(fade, LatestButton); Storyboard.SetTargetProperty(fade, "Opacity");
+        Storyboard.SetTarget(slide, LatestTranslation); Storyboard.SetTargetProperty(slide, "Y");
+        var transition = _latestTransition = new Storyboard(); transition.Children.Add(fade); transition.Children.Add(slide);
+        transition.Completed += (_, _) => { if (ReferenceEquals(_latestTransition, transition) && !_latestVisible) LatestButton.Visibility = Visibility.Collapsed; };
+        transition.Begin();
     }
     private static T? FindVisual<T>(DependencyObject root) where T : DependencyObject
     {
@@ -820,7 +892,7 @@ public sealed partial class MainWindow : Window
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         { if (_following && _messages.Count > 0 && MessageList.ContainerFromIndex(_messages.Count - 1) is DependencyObject container) TranscriptCard.ScrollGroupToEnd(container, _messages[^1]); });
     }
-    private void OnLatest(object sender, RoutedEventArgs e) { _readingActivityHistory = false; _following = true; ScrollLatest(); }
+    private void OnLatest(object sender, RoutedEventArgs e) { _readingActivityHistory = false; _following = true; ScrollLatest(); SetLatestVisible(false); }
     private void OnTranscriptSearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RenderMessages(true); }
     private void ToggleFind(bool open)
     {
@@ -974,8 +1046,27 @@ public sealed partial class MainWindow : Window
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed }; error.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
         foreach (var item in new FrameworkElement[] { mode, discovery, new TextBlock { Text = _text["ConnectionHelp"], TextWrapping = TextWrapping.Wrap }, home, exe, theme, language, new TextBlock { Text = _text["PrivacyNote"], TextWrapping = TextWrapping.Wrap, FontSize = 12 }, error }) panel.Children.Add(item);
         var dialog = new ContentDialog { Title = _text["Settings"], Content = new ScrollViewer { Content = panel, MaxHeight = 530 }, PrimaryButtonText = _text["Save"], CloseButtonText = _text["Cancel"], DefaultButton = ContentDialogButton.Primary };
+        var settingsContent = dialog.Content; var showingLicenses = false; double settingsOffset = 0;
+        var licenses = new Button { Content = _text["OpenSourceLicenses"], HorizontalAlignment = HorizontalAlignment.Left };
+        AutomationProperties.SetName(licenses, _text["OpenSourceLicenses"]); panel.Children.Add(licenses);
+        licenses.Click += (_, _) =>
+        {
+            settingsOffset = ((ScrollViewer)settingsContent).VerticalOffset;
+            showingLicenses = true; dialog.Title = _text["OpenSourceLicenses"]; dialog.Content = new LicensePanel(_text);
+            dialog.PrimaryButtonText = ""; dialog.CloseButtonText = _text["Back"]; dialog.DefaultButton = ContentDialogButton.Close;
+        };
         dialog.Opened += (_, _) => { if (mode.SelectedIndex == 1) discovery.Activate(); _ = home.ScanAsync(); _ = exe.CheckAsync(); };
-        dialog.Closing += (_, _) => { settingsOpen = false; discovery.Deactivate(); home.Cancel(); };
+        dialog.Closing += (_, args) =>
+        {
+            if (showingLicenses)
+            {
+                args.Cancel = true; showingLicenses = false; dialog.Title = _text["Settings"]; dialog.Content = settingsContent;
+                dialog.PrimaryButtonText = _text["Save"]; dialog.CloseButtonText = _text["Cancel"]; dialog.DefaultButton = ContentDialogButton.Primary;
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { ((ScrollViewer)settingsContent).ChangeView(null, settingsOffset, null, true); licenses.Focus(FocusState.Programmatic); });
+                return;
+            }
+            settingsOpen = false; discovery.Deactivate(); home.Cancel();
+        };
         dialog.PrimaryButtonClick += (_, args) =>
         {
             var errorKey = !CodexHomeDiscovery.IsValidPath(home.Home) ? "InvalidHome" : mode.SelectedIndex == 1 && !SharedServerEndpoint.IsAllowed(discovery.Endpoint, home.Home) ? "InvalidServerAddress" : "";

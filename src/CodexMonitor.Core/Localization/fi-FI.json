@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "Laajenna, niin näet parametrit ja tulokset. Laajenna tai kutista painamalla Enter- tai välilyöntinäppäintä.",
   "RawDataHelp": "Tunnistamaton sisältö säilytetään tässä alkuperäisinä tietoina.",
   "NewSessionsAvailable": "{0} uutta istuntoa",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "Miettii",
+  "OpenSourceLicenses": "Avoimen lähdekoodin lisenssit",
+  "Components": "Komponentit",
+  "License": "Lisenssi",
+  "Notices": "Ilmoitukset"
 }

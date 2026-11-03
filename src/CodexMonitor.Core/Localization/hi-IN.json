@@ -235,5 +235,10 @@
   "ActivityDetailsHelp": "पैरामीटर और परिणाम देखने के लिए खोलें। टॉगल करने के लिए Enter या Space दबाएँ।",
   "RawDataHelp": "पहचानी न गई सामग्री यहाँ मूल डेटा के रूप में सुरक्षित रखी जाती है।",
   "NewSessionsAvailable": "{0} नए सत्र",
-  "ActivityStatus": "{0} · {1}"
+  "ActivityStatus": "{0} · {1}",
+  "Thinking": "सोच रहा है",
+  "OpenSourceLicenses": "ओपन-सोर्स लाइसेंस",
+  "Components": "घटक",
+  "License": "लाइसेंस",
+  "Notices": "सूचनाएँ"
 }
