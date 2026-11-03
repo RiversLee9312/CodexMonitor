@@ -83,6 +83,9 @@ public sealed partial class MainWindow
     internal static string ScreenshotDirectory => Environment.GetEnvironmentVariable("CODEX_MONITOR_SCREENSHOTS") ?? Path.Combine(AppContext.BaseDirectory, "TestResults", "screenshots");
     internal bool ReviewSessionAttached => _selected is not null && _attached.Contains(_selected.Id);
     internal bool ReviewCanCompose => Composer.IsEnabled;
+    internal bool ReviewHasServer => _client is { IsConnected: true };
+    internal void SetSessionServerReview(CodexClient client) { _client = client; ObserveClient(client); _connectionEndpoint = "ws://127.0.0.1:45123"; UpdateChrome(); }
+    internal void NotifyTranscriptReview(RpcMessage message) { if (_client is not null) HandleMessage(_client, message); }
     internal string ReviewSessionConnectionLabel => SessionConnectButton.Content?.ToString() ?? "";
     internal string ReviewNotice => Notice.Message;
     internal void ConfigureSessionConnectionReview(ISessionServerLocator locator, Func<SessionServerMatch, CancellationToken, Task<CodexClient>> open)

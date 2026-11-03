@@ -73,6 +73,42 @@ public sealed class SessionConnectionUiTests
         Assert.IsFalse(window.ReviewSessionAttached); Assert.IsFalse(runtime.Methods.Contains("thread/resume"));
     }
     [UITestMethod]
+    public async Task UnrelatedGlobalConnectionIsKeptButDoesNotEnableThisSession()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        var unrelated = new Runtime(owns: false); window.SetSessionServerReview(new(new JsonRpcClient(unrelated)));
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        await window.ConnectSessionReviewAsync();
+        Assert.IsTrue(window.ReviewHasServer); Assert.IsFalse(window.ReviewSessionAttached); Assert.IsFalse(window.ReviewCanCompose);
+        Assert.IsFalse(unrelated.Methods.Contains("thread/resume")); Assert.AreEqual("连接", window.ReviewSessionConnectionLabel);
+    }
+    [UITestMethod]
+    public async Task CurrentOwningServerIsReusedWithoutScanningOtherServers()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        var runtime = new Runtime(); window.SetSessionServerReview(new(new JsonRpcClient(runtime)));
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        await window.ConnectSessionReviewAsync();
+        Assert.IsTrue(window.ReviewSessionAttached); Assert.IsTrue(window.ReviewCanCompose); Assert.IsTrue(runtime.Methods.Contains("thread/resume"));
+        Assert.IsFalse(runtime.Methods.Contains("turn/start"));
+    }
+    [UITestMethod]
+    public async Task StreamedSummaryAndOutputStayGroupedAndCompletionIsAuthoritative()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        await window.ShowActivityReviewAsync(); await window.ConnectReviewServerAsync();
+        void Notify(string method, object values) { using var doc = JsonDocument.Parse(JsonSerializer.Serialize(values)); window.NotifyTranscriptReview(new(method, doc.RootElement.Clone())); }
+        Notify("item/reasoning/summaryTextDelta", new { threadId = "review-session", itemId = "stream-summary", delta = "Checking " });
+        Notify("item/reasoning/summaryTextDelta", new { threadId = "review-session", itemId = "stream-summary", delta = "the server." });
+        Notify("item/reasoning/textDelta", new { threadId = "review-session", itemId = "stream-summary", delta = "PRIVATE RAW REASONING" });
+        Notify("item/started", new { threadId = "review-session", item = new { id = "stream-command", type = "commandExecution", command = "dotnet test", status = "inProgress" } });
+        Notify("item/commandExecution/outputDelta", new { threadId = "review-session", itemId = "stream-command", delta = "partial" });
+        Notify("item/completed", new { threadId = "review-session", item = new { id = "stream-command", type = "commandExecution", command = "dotnet test", status = "completed", aggregatedOutput = "final", exitCode = 0 } });
+        var last = window.ReviewMessageRows.Last(); Assert.HasCount(2, last.Activities);
+        Assert.AreEqual("Checking the server.", last.Activities[0].Text); Assert.AreEqual("final", last.Activities[1].Tool?.Output);
+        Assert.AreEqual(ToolActivityState.Completed, last.Activities[1].Tool?.State);
+    }
+    [UITestMethod]
     [DataRow(560, 600, "Dark", "zh-CN", false)]
     [DataRow(1180, 800, "Light", "zh-CN", true)]
     [DataRow(560, 650, "Light", "de-DE", true)]

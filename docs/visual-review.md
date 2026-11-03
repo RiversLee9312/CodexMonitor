@@ -6,7 +6,7 @@
 
 运行 `scripts/Test-Layout.ps1`。测试宿主直接编译生产的 `MainWindow.xaml`、代码和 `Styles.xaml`，使用独立的合成会话，不调用 CLI、不读取真实 transcript、不保存设置。测试在 WinUI UI 线程执行，使用 MSTest 的 `UITestMethod` 和 Microsoft.Testing.Platform。
 
-42 项 UI 用例全部通过（包含以下布局矩阵及会话列表回归）：
+45 项 UI 用例全部通过（包含以下布局矩阵及会话列表回归）：
 
 * 560×600 浅色简体中文。
 * 760×650 深色简体中文。
