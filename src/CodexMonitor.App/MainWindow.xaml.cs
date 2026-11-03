@@ -172,7 +172,7 @@ public sealed partial class MainWindow : Window
         NoMessagesText.Text = _text["NoMessages"]; ResumeLabel.Text = _text["Resume"];
         RestoreExplanation.Text = _text["RestoreSessionExplanation"]; ConnectExplanation.Text = _text["ConnectSessionExplanation"]; ArchiveExplanation.Text = _text["ArchivedReadOnly"];
         StopButton.Content = _text["Interrupt"];
-        UpdateChrome(); UpdateTitle(); RenderMessages(true); ApplyFilter(true);
+        UpdateChrome(); UpdateTitle(); RenderMessages(); ApplyFilter(true);
         UpdateCaptionTheme();
     }
     private void UpdateCaptionTheme()

@@ -8,6 +8,15 @@ namespace CodexMonitor.Core.Tests;
 public sealed class ProtocolCoverageTests
 {
     [TestMethod]
+    public void OldSettingsEventsAreStructuredAndUnknownEventHeadersDoNotExposeRawPayloads()
+    {
+        using var doc = JsonDocument.Parse("""{"type":"thread_settings_applied","thread_id":"s","model":"example"}""");
+        var settings = RecordedEvents.Parse(doc.RootElement, "id", default)!;
+        Assert.IsNull(settings.RawJson); Assert.AreEqual("EventSession", settings.Tool?.CategoryKey);
+        var unknown = TranscriptEvents.Parse("future/event", doc.RootElement)!;
+        Assert.IsNotNull(unknown.RawJson); Assert.AreEqual("", unknown.Tool?.Summary);
+    }
+    [TestMethod]
     public void InternalFileMapsAndConnectorContextNormalizeWithoutLosingDiffsErrorsOrTiming()
     {
         using var patch = JsonDocument.Parse("""{"id":"p","type":"FileChange","status":"Completed","changes":{"D:/New.cs":{"type":"Add","content":"first\nsecond\n"},"D:/Old.cs":{"type":"Update","unified_diff":"@@\n-old\n+new","move_path":"D:/Renamed.cs"}},"stdout":"Applied","stderr":""}""");

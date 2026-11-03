@@ -39,7 +39,7 @@ public static class RecordedEvents
         var method = type switch
         {
             "warning" => "warning", "error" or "stream_error" => "error", "deprecation_notice" => "deprecationNotice", "guardian_warning" => "guardianWarning",
-            "plan_update" => "turn/plan/updated", "turn_diff" => "turn/diff/updated", "context_compacted" => "thread/compacted",
+            "plan_update" => "turn/plan/updated", "turn_diff" => "turn/diff/updated", "context_compacted" => "thread/compacted", "thread_settings_applied" => "thread/settings/updated",
             "mcp_startup_update" or "mcp_startup_complete" => "mcpServer/startupStatus/updated", "hook_started" => "hook/started", "hook_completed" => "hook/completed",
             _ => null
         };
@@ -55,6 +55,6 @@ public static class RecordedEvents
         }
         if (type.EndsWith("_delta", StringComparison.Ordinal) || type is "item_started" or "agent_reasoning_section_break" or "session_configured") return null;
         var original = TranscriptEvents.Sanitize(p);
-        return new(id, EntryKind.Event, original, time, type, original, Tool: new(type, original, CategoryOverride: "ToolDetails"));
+        return new(id, EntryKind.Event, original, time, type, original, Tool: new(type, original, SummaryOverride: "", CategoryOverride: "ToolDetails"));
     }
 }

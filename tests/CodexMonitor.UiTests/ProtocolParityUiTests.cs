@@ -14,6 +14,19 @@ public sealed class ProtocolParityUiTests
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
     [DataRow("Light", "zh-CN")]
+    [DataRow("Dark", "de-DE")]
+    public async Task ThemeChangesKeepReadingRowsAndTheVisibleAnchor(string theme, string language)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, theme, language);
+        var before = await window.TranscriptAnchorReviewAsync(false);
+        var anchor = window.ReviewMessageRows.Single(row => row.Entry.Id == "message-18");
+        await window.SwitchReviewThemeAsync(theme == "Light" ? "Dark" : "Light");
+        Assert.AreSame(anchor, window.ReviewMessageRows.Single(row => row.Entry.Id == "message-18"));
+        var after = await window.TranscriptAnchorReviewAsync(true); Assert.AreEqual(before, after, 2);
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"theme-reading-anchor-{theme}-{language}"));
+    }
+    [UITestMethod]
+    [DataRow("Light", "zh-CN")]
     [DataRow("Dark", "ar-SA")]
     public async Task InternalCommandArraysHaveReadableHeadersAndExpandedOutput(string theme, string language)
     {

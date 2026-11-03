@@ -29,7 +29,7 @@ public static class TranscriptEvents
             if (!ProtocolEventCatalog.Notifications.TryGetValue(method, out var definition))
             {
                 var original = Sanitize(p);
-                return new(Guid.NewGuid().ToString(), EntryKind.Event, original, time, method, original, Tool: new(method, original, State: ToolActivityState.Unknown, CategoryOverride: "ToolDetails"));
+                return new(Guid.NewGuid().ToString(), EntryKind.Event, original, time, method, original, Tool: new(method, original, State: ToolActivityState.Unknown, SummaryOverride: "", CategoryOverride: "ToolDetails"));
             }
             if (definition.Route == ProtocolEventRoute.Stream) return null;
             var safe = Sanitize(p);
