@@ -70,7 +70,6 @@
               <TextBlock x:Name="SessionSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
-              <Button x:Name="SessionConnectButton" Click="OnSessionConnect" VerticalAlignment="Top" MinHeight="36"/>
               <Button x:Name="FindButton" Style="{StaticResource IconButtonStyle}" Click="OnFind"><FontIcon Glyph="&#xE721;" FontSize="16"/></Button>
               <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}"><FontIcon Glyph="&#xE712;" FontSize="16"/>
                 <Button.Flyout><MenuFlyout>
@@ -78,6 +77,7 @@
                   <MenuFlyoutItem x:Name="ExportMenu" Click="OnExport"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutItem x:Name="OpenFolderMenu" Click="OnOpenFolder"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE838;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutSeparator/>
+                  <MenuFlyoutItem x:Name="RetrySessionConnectionMenu" Click="OnRetrySessionAction"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutItem x:Name="DisconnectMenu" Click="OnConnect"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8D8;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                 </MenuFlyout></Button.Flyout>
               </Button>
@@ -105,17 +105,27 @@
                 <TextBlock x:Name="NoMessagesText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
               </Grid>
-              <Grid Grid.Row="2" Margin="24,0,24,8" ColumnSpacing="12">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <CheckBox x:Name="ToolsCheck" IsChecked="True" Click="OnToolsChanged" MinHeight="32"/>
-                <Button x:Name="LatestButton" Grid.Column="1" Visibility="Collapsed" Click="OnLatest"/>
-              </Grid>
-              <Border Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,16,24,18">
-                <Grid MaxWidth="920" RowSpacing="10">
-                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                  <Button x:Name="ResumeButton" HorizontalAlignment="Left" Click="OnResume"/>
-                  <TextBox x:Name="Composer" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextChanged="OnComposerChanged"/>
-                  <Grid Grid.Row="2" ColumnSpacing="16">
+              <Button x:Name="LatestButton" Grid.Row="2" HorizontalAlignment="Right" Margin="24,0,24,8" Visibility="Collapsed" Click="OnLatest"/>
+              <Border x:Name="SessionFooter" Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,16,24,18">
+                <Grid MaxWidth="920" RowSpacing="12">
+                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                  <TextBox x:Name="Composer" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextChanged="OnComposerChanged"/>
+                  <StackPanel x:Name="SessionSetupHelp" Spacing="6">
+                    <TextBlock x:Name="RestoreExplanation" FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <TextBlock x:Name="ConnectExplanation" FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                  </StackPanel>
+                  <TextBlock x:Name="ArchiveExplanation" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed"/>
+                  <Grid x:Name="SessionSetupActions" Grid.Row="1" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid x:Name="SessionConnectionUnavailable" ColumnSpacing="8" Visibility="Collapsed" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <FontIcon Glyph="&#xE7BA;" FontSize="16" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Top" Margin="0,2,0,0" AutomationProperties.AccessibilityView="Raw"/>
+                      <TextBlock x:Name="SessionConnectionReason" Grid.Column="1" FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </Grid>
+                    <Button x:Name="ResumeButton" Grid.Column="1" Click="OnResume" MinHeight="40" VerticalAlignment="Bottom"><TextBlock x:Name="ResumeLabel" TextWrapping="Wrap" MaxWidth="170"/></Button>
+                    <Button x:Name="SessionConnectButton" Grid.Column="2" Click="OnSessionConnect" MinHeight="40" VerticalAlignment="Bottom"><TextBlock x:Name="SessionConnectLabel" TextWrapping="Wrap" MaxWidth="190"/></Button>
+                  </Grid>
+                  <Grid x:Name="ComposerActions" Grid.Row="1" ColumnSpacing="16">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="ComposerHint" VerticalAlignment="Center" TextWrapping="Wrap" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     <Button x:Name="StopButton" Grid.Column="1" Click="OnStop" MinHeight="40"/>

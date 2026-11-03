@@ -31,8 +31,15 @@ public sealed class LayoutTests
             Assert.IsTrue(rect.Left >= -1 && rect.Top >= -1 && rect.Right <= window.ReviewRoot.ActualWidth + 1 && rect.Bottom <= window.ReviewRoot.ActualHeight + 1, $"{name} outside window: {rect}");
         }
         var bounds = window.ReviewBounds();
-        Assert.IsTrue(bounds["messages"].Bottom <= bounds["tools"].Top + 1, "Transcript overlaps the toolbar");
-        Assert.IsTrue(bounds["composer"].Bottom <= bounds["send"].Top + 1, "Composer overlaps send button");
+        Assert.IsTrue(bounds["messages"].Bottom <= bounds["footer"].Top + 1, "Transcript overlaps session actions");
+        if (bounds.ContainsKey("composer")) Assert.IsTrue(bounds["composer"].Bottom <= bounds["send"].Top + 1, "Composer overlaps send button");
+        else
+        {
+            Assert.IsFalse(window.ReviewComposerVisible); Assert.IsTrue(window.ReviewSetupVisible);
+            Assert.AreNotEqual(window.ReviewResumeButtonVisible, window.ReviewConnectionButtonVisible, "Exactly one session action must be offered");
+            var action = bounds.ContainsKey("resume") ? bounds["resume"] : bounds["sessionConnect"];
+            Assert.IsTrue(bounds["setupHelp"].Bottom <= action.Top + 1);
+        }
         Assert.AreEqual(window.ReviewRoot.ActualWidth < 900, window.ReviewIsOverlay);
         Assert.AreEqual(language is "ar-SA" or "he-IL", window.ReviewIsRtl);
     }

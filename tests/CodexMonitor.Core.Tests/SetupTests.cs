@@ -7,6 +7,12 @@ namespace CodexMonitor.Core.Tests;
 public sealed class SetupTests
 {
     [TestMethod]
+    public void SettingsSavedWithTheRetiredActivitySwitchKeepTheirOtherPreferences()
+    {
+        var settings = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("""{"CodexHome":"D:/history","Theme":"Dark","Language":"de-DE","ShowTools":false}""")!;
+        Assert.AreEqual("D:/history", settings.CodexHome); Assert.AreEqual("Dark", settings.Theme); Assert.AreEqual("de-DE", settings.Language);
+    }
+    [TestMethod]
     public async Task HomeDiscoveryChecksKnownPathsDeduplicatesAndDoesNotReadCredentialFiles()
     {
         var root = Directory.CreateTempSubdirectory("CodexMonitor-discovery-").FullName;

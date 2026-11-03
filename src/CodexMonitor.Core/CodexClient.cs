@@ -11,7 +11,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.2" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.3" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new { }, ct).ConfigureAwait(false);
     }

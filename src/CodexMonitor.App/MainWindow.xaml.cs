@@ -25,6 +25,8 @@ public sealed partial class MainWindow : Window
     private ISessionServerLocator _sessionServerLocator = new SessionServerLocator();
     private Func<SessionServerMatch, CancellationToken, Task<CodexClient>> _openSessionServer = null!;
     private readonly HashSet<string> _expandedActivities = [];
+    private readonly Dictionary<string, string> _sessionConnectionFailures = [];
+    private Func<SessionInfo, CancellationToken, Task<SessionInfo>> _checkResumeState = null!;
     private bool _findingSessionServer;
     private string? _connectionEndpoint;
     private CancellationTokenSource? _sessionConnectCancellation;
@@ -56,6 +58,7 @@ public sealed partial class MainWindow : Window
     internal MainWindow(bool reviewMode)
     {
         _reviewMode = reviewMode;
+        _checkResumeState = CheckResumeStateAsync;
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
         _text = new(_settings.Language); _store = new(_settings.CodexHome);
         InitializeComponent();
@@ -138,13 +141,13 @@ public sealed partial class MainWindow : Window
         Label(NewButton, "NewSession"); Label(RefreshButton, "Refresh"); Label(SettingsButton, "Settings"); Label(PaneButton, "ShowSessions");
         Label(FindButton, "SearchTranscript"); Label(MoreButton, "Details"); Label(CloseFindButton, "Close");
         DetailsMenu.Text = _text["Details"]; ExportMenu.Text = _text["Export"]; OpenFolderMenu.Text = _text["OpenFolder"];
-        ToolsCheck.Content = _text["ShowTools"]; ToolsCheck.IsChecked = _settings.ShowTools;
         LatestButton.Content = _text["JumpToLatest"];
         Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessagePlaceholder"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
         NoSessionsTitle.Text = _text["NoSessions"]; NoSessionsHint.Text = _text["NoSessionsHint"];
         WelcomeTitle.Text = _text["SelectSession"]; ApplyCliWelcomeState();
-        NoMessagesText.Text = _text["NoMessages"]; ResumeButton.Content = _text["Resume"];
+        NoMessagesText.Text = _text["NoMessages"]; ResumeLabel.Text = _text["Resume"];
+        RestoreExplanation.Text = _text["RestoreSessionExplanation"]; ConnectExplanation.Text = _text["ConnectSessionExplanation"]; ArchiveExplanation.Text = _text["ArchivedReadOnly"];
         StopButton.Content = _text["Interrupt"];
         UpdateChrome(); UpdateTitle(); RenderMessages(true); ApplyFilter(true);
         UpdateCaptionTheme();
@@ -199,6 +202,7 @@ public sealed partial class MainWindow : Window
                     var merged = local.ToDictionary(x => x.Id);
                     foreach (var item in live)
                     {
+                        if (item.IsLive) _sessionConnectionFailures.Remove(item.Id);
                         if (merged.TryGetValue(item.Id, out var disk)) merged[item.Id] = item with
                         { FilePath = disk.FilePath, Title = string.IsNullOrEmpty(item.Title) ? disk.Title : item.Title, ParentId = item.ParentId ?? disk.ParentId, Model = disk.Model,
                             State = item.State == SessionState.Unknown ? disk.State : item.State, FileVersion = disk.FileVersion };
@@ -313,9 +317,8 @@ public sealed partial class MainWindow : Window
     {
         if (_snapshot is null) { _messages.Clear(); return; }
         var query = TranscriptSearch.Text.Trim();
-        var entries = _snapshot.Entries.Where(e => (_settings.ShowTools || e.Kind is EntryKind.User or EntryKind.Assistant)
-            && (query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase))).ToArray();
-        var rows = EntryRow.Project(entries, _text, _expandedActivities);
+        var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+        var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting });
         // Virtualized ListView keeps the entire transcript accessible without an artificial history cutoff.
         if (reset) _messages.Clear();
         var common = 0;
@@ -341,11 +344,28 @@ public sealed partial class MainWindow : Window
         ActivityNote.Text = connected ? "" : _text["ActivityNote"];
         NewButton.IsEnabled = !_connecting && !_findingSessionServer && !_sending;
         var attached = connected && _selected is not null && _attached.Contains(_selected.Id) && !_selected.IsArchived;
+        var archived = _selected?.IsArchived == true;
+        var showResume = _selected is not null && SessionConnectionPolicy.CanResume(_selected);
+        var showConnect = _selected is not null && !archived && !showResume;
+        var failure = _selected is not null ? _sessionConnectionFailures.GetValueOrDefault(_selected.Id) : null;
         var needsTurn = attached && _selected?.State is SessionState.Active or SessionState.Waiting && string.IsNullOrEmpty(_selected.ActiveTurnId);
-        SessionConnectButton.Visibility = _selected is null ? Visibility.Collapsed : Visibility.Visible;
-        SessionConnectButton.Content = _text[_findingSessionServer ? "FindingSessionServer" : attached && !needsTurn ? "SessionConnected" : "ConnectSession"];
+        SessionSetupHelp.Visibility = !attached && !archived && failure is null ? Visibility.Visible : Visibility.Collapsed;
+        SessionSetupActions.Visibility = !attached && !archived ? Visibility.Visible : Visibility.Collapsed;
+        Composer.Visibility = ComposerActions.Visibility = attached ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveExplanation.Visibility = archived ? Visibility.Visible : Visibility.Collapsed;
+        ResumeButton.Visibility = RestoreExplanation.Visibility = showResume && failure is null ? Visibility.Visible : Visibility.Collapsed;
+        SessionConnectButton.Visibility = ConnectExplanation.Visibility = showConnect && failure is null ? Visibility.Visible : Visibility.Collapsed;
+        SessionConnectionUnavailable.Visibility = !archived && failure is not null ? Visibility.Visible : Visibility.Collapsed;
+        SessionConnectionReason.Text = failure is not null ? _text[failure] : "";
+        SessionConnectLabel.Text = _text[_findingSessionServer ? "FindingSessionServer" : _connecting ? "SessionConnecting" : "ConnectSession"];
+        ResumeLabel.Text = _text[_sending && !attached ? "Loading" : "Resume"];
+        RetrySessionConnectionMenu.Text = _text["CheckAgain"];
+        RetrySessionConnectionMenu.Visibility = failure is not null || needsTurn ? Visibility.Visible : Visibility.Collapsed;
+        RetrySessionConnectionMenu.IsEnabled = !_findingSessionServer && !_connecting && !_sending;
         SessionConnectButton.IsEnabled = !_findingSessionServer && !_connecting && !_sending && _selected is { IsArchived: false } && (!attached || needsTurn);
-        AutomationProperties.SetName(SessionConnectButton, _text[attached && !needsTurn ? "SessionConnected" : "ConnectSessionHint"]);
+        AutomationProperties.SetName(SessionConnectButton, _text["ConnectSessionHint"]);
+        AutomationProperties.SetHelpText(SessionConnectButton, _text["ConnectSessionExplanation"]);
+        AutomationProperties.SetHelpText(ResumeButton, _text["RestoreSessionExplanation"]);
         ToolTipService.SetToolTip(SessionConnectButton, attached && !needsTurn ? _connectionEndpoint ?? _text["SessionConnected"] : _text["ConnectSessionHint"]);
         var active = _selected?.State is SessionState.Active or SessionState.Waiting;
         var canSteer = active && !string.IsNullOrEmpty(_selected?.ActiveTurnId);
@@ -354,13 +374,13 @@ public sealed partial class MainWindow : Window
         SendButton.Content = _text[canSteer ? "Steer" : "Send"];
         StopButton.Visibility = attached && canSteer ? Visibility.Visible : Visibility.Collapsed;
         StopButton.IsEnabled = !_sending;
-        ResumeButton.Visibility = _selected is { IsArchived: false } && !attached && _selected.State is not (SessionState.RecordedActive or SessionState.Active or SessionState.Waiting) ? Visibility.Visible : Visibility.Collapsed;
-        ResumeButton.IsEnabled = !_sending;
-        ComposerHint.Text = _text[_selected?.IsArchived == true ? "ArchivedReadOnly" : !attached ? "SessionNotAttached" : active && !canSteer ? "RuntimeTurnUnavailable" : canSteer ? "SteerHint" : "SendHint"];
+        ResumeButton.IsEnabled = !_sending && !_connecting && !_findingSessionServer && showResume;
+        ToolTipService.SetToolTip(ResumeButton, _text["RestoreSessionExplanation"]);
+        ComposerHint.Text = _text[active && !canSteer ? "RuntimeTurnUnavailable" : canSteer ? "SteerHint" : "SendHint"];
     }
     private void OnComposerChanged(object sender, TextChangedEventArgs e) { if (_ready) UpdateChrome(); }
     private async void OnConnect(object sender, RoutedEventArgs e) => await ConnectAsync();
-    private async Task ConnectAsync()
+    private async Task ConnectAsync(string? sessionActionId = null)
     {
         if (_connecting) return;
         _connecting = true; UpdateChrome();
@@ -384,11 +404,18 @@ public sealed partial class MainWindow : Window
         catch (FileNotFoundException) when (!_settings.UseSharedServer)
         { await ShowCliSetupAsync(); }
         catch (Exception ex) when (ex is IOException or ArgumentException or System.Net.WebSockets.WebSocketException or RpcException or OperationCanceledException or System.ComponentModel.Win32Exception)
-        { NoticeText("ConnectionFailed", InfoBarSeverity.Error); }
+        { if (sessionActionId is not null) SetSessionConnectionFailure(sessionActionId, "ConnectionFailed"); else NoticeText("ConnectionFailed", InfoBarSeverity.Error); }
         finally { _connecting = false; UpdateChrome(); }
     }
     private async void OnResume(object sender, RoutedEventArgs e) => await ResumeAsync();
     private async void OnSessionConnect(object sender, RoutedEventArgs e) => await ConnectSessionAsync();
+    private async void OnRetrySessionAction(object sender, RoutedEventArgs e) => await RetrySessionActionAsync();
+    private async Task RetrySessionActionAsync()
+    {
+        if (_selected is not { } session || _findingSessionServer || _connecting || _sending) return;
+        _sessionConnectionFailures.Remove(session.Id); UpdateChrome();
+        if (SessionConnectionPolicy.CanResume(session)) await ResumeAsync(); else await ConnectSessionAsync();
+    }
     private void ObserveClient(CodexClient client)
     {
         client.Rpc.Message += message => DispatcherQueue.TryEnqueue(() => HandleMessage(client, message));
@@ -403,6 +430,7 @@ public sealed partial class MainWindow : Window
         using var cancellation = _sessionConnectCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         cancellation.CancelAfter(TimeSpan.FromSeconds(25));
         var ct = cancellation.Token; _findingSessionServer = true; UpdateChrome();
+        _sessionConnectionFailures.Remove(session.Id); Notice.IsOpen = false; UpdateChrome();
         CodexClient? next = null;
         try
         {
@@ -411,7 +439,7 @@ public sealed partial class MainWindow : Window
             {
                 var matches = await _sessionServerLocator.FindAsync(session.Id, _settings.CodexHome, _settings.Executable,
                     _connectionEndpoint ?? (_settings.UseSharedServer ? _settings.Endpoint : null), ct);
-                if (matches.Count == 0) { NoticeText("SessionServerNotFound", InfoBarSeverity.Informational); return; }
+                if (matches.Count == 0) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
                 var match = matches[0];
                 if (matches.Count > 1)
                 {
@@ -424,9 +452,9 @@ public sealed partial class MainWindow : Window
                 if (_selected?.Id != session.Id) return;
                 next = await _openSessionServer(match, ct); client = next;
                 // Recheck after opening the actual connection. Never resume on the strength of stored history alone.
-                if (!(await client.LoadedThreadIdsAsync(ct)).Contains(session.Id)) { NoticeText("SessionServerNotFound"); return; }
+                if (!(await client.LoadedThreadIdsAsync(ct)).Contains(session.Id)) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
                 var runtime = await client.RuntimeAsync(session.Id, ct);
-                if (!runtime.IsLive) { NoticeText("SessionServerNotFound"); return; }
+                if (!runtime.IsLive) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
                 var joiningMessages = new List<RpcMessage>();
                 Action<RpcMessage> duringJoin = message => DispatcherQueue.TryEnqueue(() =>
                 {
@@ -445,23 +473,25 @@ public sealed partial class MainWindow : Window
             else
             {
                 var runtime = await client.RuntimeAsync(session.Id, ct);
-                if (!runtime.IsLive) { NoticeText("SessionServerNotFound"); return; }
+                if (!runtime.IsLive) { SetSessionConnectionFailure(session.Id, "SessionServerNotFound"); return; }
                 ApplyAttachedSession(session, await client.WithActiveTurnAsync(await client.ResumeAsync(session.Id, ct), ct));
             }
             Notice.IsOpen = false;
             if (_selected?.Id == session.Id) { await LoadTranscriptAsync(_selected, false); Composer.Focus(FocusState.Programmatic); }
         }
-        catch (OperationCanceledException) { if (!_lifetime.IsCancellationRequested && _selected?.Id == session.Id) NoticeText("SessionServerLookupFailed", InfoBarSeverity.Warning); }
+        catch (OperationCanceledException) { if (!_lifetime.IsCancellationRequested && _selected?.Id == session.Id) SetSessionConnectionFailure(session.Id, "SessionServerLookupFailed"); }
         catch (Exception e) when (e is IOException or RpcException or ArgumentException or System.Net.WebSockets.WebSocketException or System.Net.Sockets.SocketException)
-        { NoticeText("SessionServerLookupFailed", InfoBarSeverity.Warning); }
+        { SetSessionConnectionFailure(session.Id, "SessionServerLookupFailed"); }
         finally
         {
             if (next is not null) await next.DisposeAsync();
             _sessionConnectCancellation = null; _findingSessionServer = false; UpdateTitle(); UpdateChrome();
         }
     }
+    private void SetSessionConnectionFailure(string id, string key) => _sessionConnectionFailures[id] = key;
     private void ApplyAttachedSession(SessionInfo original, SessionInfo runtime)
     {
+        _sessionConnectionFailures.Remove(original.Id);
         _attached.Add(original.Id);
         var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = original.Model, FileVersion = original.FileVersion };
         _sessions = _sessions.Select(s => s.Id == original.Id ? joined : s).ToArray();
@@ -471,13 +501,22 @@ public sealed partial class MainWindow : Window
     private async Task ResumeAsync()
     {
         if (_selected is not { IsArchived: false } session || _sending || _findingSessionServer) return;
-        if (session.State is SessionState.RecordedActive or SessionState.Active or SessionState.Waiting) { await ConnectSessionAsync(); return; }
-        if (_client is not { IsConnected: true }) await ConnectAsync();
-        if (_client is not { IsConnected: true } client || _selected?.Id != session.Id) return;
+        if (!SessionConnectionPolicy.CanResume(session)) { await ConnectSessionAsync(); return; }
+        var connectInstead = false;
         _sending = true; UpdateChrome();
         try
         {
+            // Recheck before creating a local server, and again before resuming on a connected server.
+            session = await _checkResumeState(session, _lifetime.Token);
+            if (_selected?.Id != session.Id) return;
+            if (!SessionConnectionPolicy.CanResume(session)) { UpdateCheckedSession(session); connectInstead = true; return; }
+            if (_client is not { IsConnected: true }) await ConnectAsync(session.Id);
+            if (_client is not { IsConnected: true } client || _selected?.Id != session.Id) return;
+            session = await _checkResumeState(session, _lifetime.Token);
+            if (_selected?.Id != session.Id) return;
+            if (!SessionConnectionPolicy.CanResume(session)) { UpdateCheckedSession(session); connectInstead = true; return; }
             var result = await client.WithActiveTurnAsync(await client.ResumeAsync(session.Id, _lifetime.Token), _lifetime.Token);
+            _sessionConnectionFailures.Remove(session.Id);
             _attached.Add(session.Id);
             if (_selected?.Id == session.Id)
             {
@@ -485,8 +524,26 @@ public sealed partial class MainWindow : Window
                 await LoadTranscriptAsync(_selected, false); Composer.Focus(FocusState.Programmatic);
             }
         }
-        catch (Exception e) when (e is IOException or RpcException or OperationCanceledException) { NoticeText("ResumeFailed", InfoBarSeverity.Error); }
-        finally { _sending = false; UpdateTitle(); UpdateChrome(); }
+        catch (Exception e) when (e is IOException or RpcException or OperationCanceledException) { SetSessionConnectionFailure(session.Id, "ResumeFailed"); Notice.IsOpen = false; }
+        finally
+        {
+            _sending = false; UpdateTitle(); UpdateChrome();
+            if (connectInstead && _selected?.Id == session.Id && !_closing) await ConnectSessionAsync();
+            else if (Composer.IsEnabled) Composer.Focus(FocusState.Programmatic);
+        }
+    }
+    private async Task<SessionInfo> CheckResumeStateAsync(SessionInfo original, CancellationToken ct)
+    {
+        var local = (await _store.ListAsync(ct)).FirstOrDefault(s => s.Id == original.Id) ?? original;
+        if (_client is { IsConnected: true } client && (await client.LoadedThreadIdsAsync(ct)).Contains(original.Id))
+            return (await client.RuntimeAsync(original.Id, ct)) with { FilePath = local.FilePath, Title = local.Title, ParentId = local.ParentId, FileVersion = local.FileVersion };
+        return local;
+    }
+    private void UpdateCheckedSession(SessionInfo session)
+    {
+        _sessions = _sessions.Select(s => s.Id == session.Id ? session : s).ToArray();
+        if (_selected?.Id == session.Id) _selected = session;
+        ApplyFilter();
     }
     private async void OnSend(object sender, RoutedEventArgs e) => await SendAsync();
     private async Task SendAsync()
@@ -630,7 +687,6 @@ public sealed partial class MainWindow : Window
     }
     private void ScrollLatest() { if (_messages.Count > 0) MessageList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Leading); }
     private void OnLatest(object sender, RoutedEventArgs e) { _following = true; ScrollLatest(); }
-    private void OnToolsChanged(object sender, RoutedEventArgs e) { _settings = _settings with { ShowTools = ToolsCheck.IsChecked == true }; _settings.Save(); RenderMessages(true); }
     private void OnTranscriptSearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RenderMessages(true); }
     private void ToggleFind(bool open) { FindPanel.Visibility = open && _selected is not null ? Visibility.Visible : Visibility.Collapsed; if (open) TranscriptSearch.Focus(FocusState.Keyboard); else TranscriptSearch.Text = ""; }
     private void OnFind(object sender, RoutedEventArgs e) => ToggleFind(true);
@@ -787,6 +843,7 @@ public sealed partial class MainWindow : Window
         try { _settings.Save(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
         _store = new(_settings.CodexHome); _text = new(_settings.Language);
+        if (changedConnection) _sessionConnectionFailures.Clear();
         Localize();
         if (changedConnection && _client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); NoticeText("RestartConnection"); }
         else NoticeText("Saved", InfoBarSeverity.Success);

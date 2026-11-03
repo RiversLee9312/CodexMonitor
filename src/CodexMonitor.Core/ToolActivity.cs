@@ -7,6 +7,20 @@ public enum ToolActivityState { Unknown, Running, Completed, Failed }
 public sealed record ToolActivity(string Name, string Input, string? Output = null, ToolActivityState State = ToolActivityState.Running,
     long? DurationMs = null, string? SummaryOverride = null, string? CategoryOverride = null, int? AddedLines = null, int? RemovedLines = null)
 {
+    public long? WaitDurationMs
+    {
+        get
+        {
+            if (!Regex.IsMatch(Name, @"(?:^|[._:/])(?:sleep|wait)$", RegexOptions.IgnoreCase)) return null;
+            try
+            {
+                using var document = JsonDocument.Parse(Input); var root = document.RootElement;
+                var value = root.Field("duration_ms"); if (value.ValueKind == JsonValueKind.Undefined) value = root.Field("durationMs");
+                return value.TryNumber(out var duration) && duration >= 0 ? duration : null;
+            }
+            catch (JsonException) { return null; }
+        }
+    }
     public string DecodedInput
     {
         get
@@ -19,7 +33,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             return value;
         }
     }
-    public string CategoryKey => CategoryOverride ?? (Input.Contains("*** Begin Patch", StringComparison.Ordinal) ? "ToolFileChanges" :
+    public string CategoryKey => CategoryOverride ?? (WaitDurationMs is not null ? "ToolWaiting" : Input.Contains("*** Begin Patch", StringComparison.Ordinal) ? "ToolFileChanges" :
         Input.Contains("write_stdin", StringComparison.Ordinal) ? "ToolReadOutput" : Name.Contains("search", StringComparison.OrdinalIgnoreCase) ? "ToolSearch" :
         Name is "exec" or "shell" or "commandExecution" or "exec_command" || Input.Contains("exec_command", StringComparison.Ordinal) ? "ToolCommand" : "ToolDetails");
     public string Summary
@@ -27,6 +41,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         get
         {
             if (SummaryOverride is not null) return SummaryOverride;
+            if (WaitDurationMs is not null) return "";
             var value = DecodedInput;
             var file = Regex.Match(value, @"\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)");
             if (file.Success) return Path.GetFileName(file.Groups[1].Value.Trim().Replace('/', Path.DirectorySeparatorChar));

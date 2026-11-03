@@ -24,9 +24,9 @@ public sealed partial class MainWindow
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
-        _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language, ShowTools = false };
-        Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _connectionEndpoint = null;
-        _cliMissing = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe";
+        _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language };
+        Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _sessionConnectionFailures.Clear(); _connectionEndpoint = null;
+        _cliMissing = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe"; _checkResumeState = CheckResumeStateAsync;
         _text = new(language);
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
         _selected = new SessionInfo { Id = "review-session", Title = "Review the transcript layout and keyboard interactions", Cwd = "D:\\Projects\\CodexMonitor", State = SessionState.Completed, CreatedAt = time, UpdatedAt = time, FileVersion = new(100, time.UtcDateTime) };
@@ -55,13 +55,21 @@ public sealed partial class MainWindow
     }
     internal IReadOnlyDictionary<string, Windows.Foundation.Rect> ReviewBounds()
     {
-        return new Dictionary<string, Windows.Foundation.Rect>
+        var bounds = new Dictionary<string, Windows.Foundation.Rect>
         {
-            ["title"] = Bounds(SessionTitle), ["composer"] = Bounds(Composer), ["send"] = Bounds(SendButton),
+            ["title"] = Bounds(SessionTitle),
             ["find"] = Bounds(FindButton), ["more"] = Bounds(MoreButton), ["messages"] = Bounds(MessageList),
-            ["tools"] = Bounds(ToolsCheck), ["status"] = Bounds(ConnectionStatus)
-            , ["sessionConnect"] = Bounds(SessionConnectButton)
+            ["footer"] = Bounds(SessionFooter), ["status"] = Bounds(ConnectionStatus)
         };
+        if (Composer.Visibility == Visibility.Visible) { bounds["composer"] = Bounds(Composer); bounds["send"] = Bounds(SendButton); }
+        if (SessionSetupActions.Visibility == Visibility.Visible)
+        {
+            if (SessionSetupHelp.Visibility == Visibility.Visible) bounds["setupHelp"] = Bounds(SessionSetupHelp);
+            if (ResumeButton.Visibility == Visibility.Visible) bounds["resume"] = Bounds(ResumeButton);
+            if (SessionConnectButton.Visibility == Visibility.Visible) bounds["sessionConnect"] = Bounds(SessionConnectButton);
+            if (SessionConnectionUnavailable.Visibility == Visibility.Visible) bounds["connectionUnavailable"] = Bounds(SessionConnectionUnavailable);
+        }
+        return bounds;
         Windows.Foundation.Rect Bounds(FrameworkElement element) => element.TransformToVisual(Root).TransformBounds(new(0, 0, element.ActualWidth, element.ActualHeight));
     }
     internal async Task<string> CaptureReviewAsync(string name, FrameworkElement? element = null)
@@ -86,15 +94,35 @@ public sealed partial class MainWindow
     internal bool ReviewHasServer => _client is { IsConnected: true };
     internal void SetSessionServerReview(CodexClient client) { _client = client; ObserveClient(client); _connectionEndpoint = "ws://127.0.0.1:45123"; UpdateChrome(); }
     internal void NotifyTranscriptReview(RpcMessage message) { if (_client is not null) HandleMessage(_client, message); }
-    internal string ReviewSessionConnectionLabel => SessionConnectButton.Content?.ToString() ?? "";
+    internal string ReviewSessionConnectionLabel => SessionConnectLabel.Text;
+    internal string ReviewConnectionReason => SessionConnectionReason.Text;
+    internal bool ReviewBannerOpen => Notice.IsOpen;
+    internal bool ReviewSetupVisible => SessionSetupActions.Visibility == Visibility.Visible;
+    internal bool ReviewComposerVisible => Composer.Visibility == Visibility.Visible;
+    internal bool ReviewConnectionButtonVisible => ReviewSetupVisible && SessionConnectButton.Visibility == Visibility.Visible;
+    internal bool ReviewConnectionHelpVisible => SessionSetupHelp.Visibility == Visibility.Visible && ConnectExplanation.Visibility == Visibility.Visible;
+    internal bool ReviewCanResume => ResumeButton.IsEnabled;
+    internal bool ReviewResumeButtonVisible => ReviewSetupVisible && ResumeButton.Visibility == Visibility.Visible;
+    internal void SetSessionStateReview(SessionState state, bool live = false)
+    {
+        _selected = _selected! with { State = state, IsLive = live };
+        _sessions = _sessions.Select(s => s.Id == _selected.Id ? _selected : s).ToArray();
+        if (_snapshot is not null) _snapshot = _snapshot with { Session = _selected };
+        UpdateTitle(); UpdateChrome();
+    }
+    internal void ConfigureResumeGuardReview(Func<SessionInfo, CancellationToken, Task<SessionInfo>> check)
+    {
+        _checkResumeState = check;
+        _resolveExecutable = _ => throw new InvalidOperationException("A changed active session must not start another CLI server");
+    }
+    internal Task ResumeSessionReviewAsync() => ResumeAsync();
+    internal bool ReviewWaitAnimating => FindVisual<ProgressRing>(MessageList) is { IsActive: true };
     internal string ReviewNotice => Notice.Message;
     internal void ConfigureSessionConnectionReview(ISessionServerLocator locator, Func<SessionServerMatch, CancellationToken, Task<CodexClient>> open)
     { _sessionServerLocator = locator; _openSessionServer = open; }
     internal Task ConnectSessionReviewAsync() => ConnectSessionAsync();
     internal async Task ShowActivityReviewAsync(bool expand = false)
     {
-        _settings = _settings with { ShowTools = true };
-        ToolsCheck.IsChecked = true;
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
         var entries = new List<TranscriptEntry> { new("question", EntryKind.User, "检查连接状态并更新界面。", time), new("summary", EntryKind.Reasoning, "先核对服务器实际加载的会话，再检查当前轮次。", time) };
         for (int i = 0; i < 5; i++)
@@ -110,6 +138,13 @@ public sealed partial class MainWindow
         RenderMessages(true); await SettleAsync();
     }
     internal IReadOnlyList<EntryRow> ReviewMessageRows => _messages.ToArray();
+    internal async Task ShowWaitReviewAsync(bool live, bool completed, string language, string theme)
+    {
+        await SetReviewAsync(760, 650, theme, language);
+        if (live) { await ConnectReviewServerAsync(); _selected = _selected! with { IsLive = true, State = SessionState.Active, ActiveTurnId = "turn" }; _attached.Add(_selected.Id); }
+        _snapshot = new(_selected!, [new("wait", EntryKind.Tool, "{\"duration_ms\":30000}", DateTimeOffset.Now, "sleep", Tool: new("clock.sleep", "{\"duration_ms\":30000}", completed ? "Wall time: 30.0293 seconds\nSleep completed." : null, completed ? ToolActivityState.Completed : ToolActivityState.Running))]);
+        _expandedActivities.Add("wait"); RenderMessages(true); UpdateTitle(); UpdateChrome(); await SettleAsync();
+    }
 
     internal System.Collections.ObjectModel.ObservableCollection<SessionRow> ReviewSessionRows => _visibleSessionRows;
     internal object ReviewSessionSource => SessionList.ItemsSource;

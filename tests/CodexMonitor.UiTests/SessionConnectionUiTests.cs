@@ -43,12 +43,18 @@ public sealed class SessionConnectionUiTests
     public async Task NoOwnerLeavesSessionReadOnlyAndShowsAnAccurateExplanation()
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 600, "Light", "zh-CN");
+        window.SetSessionStateReview(SessionState.RecordedActive);
         var opened = false;
         window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => { opened = true; throw new InvalidOperationException(); });
         await window.ConnectSessionReviewAsync();
         Assert.IsFalse(opened); Assert.IsFalse(window.ReviewSessionAttached); Assert.IsFalse(window.ReviewCanCompose);
-        StringAssert.Contains(window.ReviewNotice, "未找到承载");
+        StringAssert.Contains(window.ReviewConnectionReason, "共享服务器"); Assert.IsFalse(window.ReviewCanResume);
+        Assert.IsFalse(window.ReviewBannerOpen); Assert.IsFalse(window.ReviewConnectionButtonVisible); Assert.IsFalse(window.ReviewConnectionHelpVisible);
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-no-owner-560-light-zh"));
+        var runtime = new Runtime();
+        window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => Task.FromResult(new CodexClient(new JsonRpcClient(runtime))));
+        await window.ConnectSessionReviewAsync();
+        Assert.IsTrue(window.ReviewComposerVisible); Assert.IsFalse(window.ReviewSetupVisible); Assert.AreEqual("", window.ReviewConnectionReason);
     }
     [UITestMethod]
     [DataRow(true)] [DataRow(false)]
@@ -59,7 +65,7 @@ public sealed class SessionConnectionUiTests
         window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => Task.FromResult(new CodexClient(new JsonRpcClient(runtime))));
         await window.ConnectSessionReviewAsync();
         Assert.IsTrue(window.ReviewSessionAttached); Assert.AreEqual(turnKnown, window.ReviewCanCompose);
-        Assert.AreEqual(turnKnown ? "已连接" : "连接", window.ReviewSessionConnectionLabel);
+        Assert.IsFalse(window.ReviewSetupVisible); Assert.IsFalse(window.ReviewConnectionButtonVisible); Assert.IsTrue(window.ReviewComposerVisible);
         Assert.IsFalse(runtime.Methods.Contains("turn/start")); Assert.IsFalse(runtime.Methods.Contains("turn/steer"));
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-owner-760-dark-" + turnKnown));
     }
@@ -80,7 +86,7 @@ public sealed class SessionConnectionUiTests
         window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
         await window.ConnectSessionReviewAsync();
         Assert.IsTrue(window.ReviewHasServer); Assert.IsFalse(window.ReviewSessionAttached); Assert.IsFalse(window.ReviewCanCompose);
-        Assert.IsFalse(unrelated.Methods.Contains("thread/resume")); Assert.AreEqual("连接", window.ReviewSessionConnectionLabel);
+        Assert.IsFalse(unrelated.Methods.Contains("thread/resume")); Assert.IsFalse(window.ReviewConnectionButtonVisible); Assert.IsFalse(window.ReviewBannerOpen);
     }
     [UITestMethod]
     public async Task CurrentOwningServerIsReusedWithoutScanningOtherServers()
@@ -91,6 +97,17 @@ public sealed class SessionConnectionUiTests
         await window.ConnectSessionReviewAsync();
         Assert.IsTrue(window.ReviewSessionAttached); Assert.IsTrue(window.ReviewCanCompose); Assert.IsTrue(runtime.Methods.Contains("thread/resume"));
         Assert.IsFalse(runtime.Methods.Contains("turn/start"));
+    }
+    [UITestMethod]
+    public async Task RestoreRechecksAgainAfterServerConnectionAndNeverResumesAChangedActiveThread()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        var runtime = new Runtime(owns: false); window.SetSessionServerReview(new(new JsonRpcClient(runtime)));
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        var checks = 0;
+        window.ConfigureResumeGuardReview((session, _) => Task.FromResult(session with { State = ++checks == 1 ? SessionState.Completed : SessionState.RecordedActive }));
+        await window.ResumeSessionReviewAsync();
+        Assert.AreEqual(2, checks); Assert.IsFalse(runtime.Methods.Contains("thread/resume")); Assert.IsFalse(window.ReviewSessionAttached);
     }
     [UITestMethod]
     public async Task StreamedSummaryAndOutputStayGroupedAndCompletionIsAuthoritative()
@@ -121,7 +138,7 @@ public sealed class SessionConnectionUiTests
         var activity = window.ReviewMessageRows[1]; Assert.HasCount(6, activity.Activities);
         Assert.AreEqual(EntryKind.Reasoning, activity.Activities[0].Kind);
         Assert.AreEqual(5, activity.Activities.Count(e => e.Kind == EntryKind.Tool));
-        var connection = window.ReviewBounds()["sessionConnect"]; Assert.IsTrue(connection.Right <= window.ReviewRoot.ActualWidth + 1);
+        var action = window.ReviewBounds()["resume"]; Assert.IsTrue(action.Right <= window.ReviewRoot.ActualWidth + 1);
         TestContext.AddResultFile(await window.CaptureReviewAsync($"activities-{width}-{theme}-{language}-{expand}"));
     }
     [UITestMethod]

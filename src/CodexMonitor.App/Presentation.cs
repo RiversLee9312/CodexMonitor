@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using System.Text.RegularExpressions;
@@ -64,22 +63,23 @@ public sealed class SessionRow(SessionInfo session, LocalizationService text, bo
     }
     public override string ToString() => AccessibleName;
 }
-public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null)
+public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false)
 {
     public TranscriptEntry Entry { get; } = entry;
     public LocalizationService Text { get; } = text;
     public IReadOnlyList<TranscriptEntry> Activities { get; } = activities ?? [entry];
     public HashSet<string> Expanded { get; } = expanded ?? [];
+    public bool IsLive { get; } = live;
     public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning;
     public string ActivityTitle { get { var count = Activities.Count(e => e.Kind == EntryKind.Tool); return count > 0 ? Text.Format("ToolActivities", Text.Number(count)) : Text["Reasoning"]; } }
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
     public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
-    public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && Activities.SequenceEqual(row.Activities);
-    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded)
+    public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities);
+    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false)
     {
         var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
-        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded)); tools.Clear(); } }
+        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded, live)); tools.Clear(); } }
         foreach (var item in entries)
         {
             if (item.Kind is EntryKind.Tool or EntryKind.Reasoning)
@@ -91,7 +91,7 @@ public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IR
                 }
                 else tools.Add(item);
             }
-            else { Flush(); rows.Add(new(item, text, expanded: expanded)); }
+            else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live)); }
         }
         Flush(); return rows;
     }
@@ -175,11 +175,12 @@ public sealed class TranscriptCard : UserControl
         var itemStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='36'/></Style>");
         return new ListView { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
-            ItemsSource = row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded)).ToArray() };
+            ItemsSource = row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive)).ToArray() };
     }
     private static FrameworkElement ToolRow(TranscriptEntry entry, EntryRow row)
     {
         var tool = entry.Tool;
+        if (tool?.WaitDurationMs is { } wait) return WaitRow(entry, tool, wait, row);
         var reasoning = entry.Kind == EntryKind.Reasoning;
         var label = reasoning ? row.Text["Reasoning"] : tool is null ? entry.Label ?? row.Text["Tool"] : tool.CategoryKey == "ToolDetails" ? tool.Name : row.Text[tool.CategoryKey];
         if (tool is { State: ToolActivityState.Completed or ToolActivityState.Running })
@@ -221,6 +222,34 @@ public sealed class TranscriptCard : UserControl
                 var copy = CopyButton(value); Grid.SetColumn(copy, 1); section.Children.Add(copy); content.Children.Add(section);
                 content.Children.Add(new ScrollViewer { Content = Code(value), MaxHeight = 300, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
             }
+        }, title);
+    }
+    private static FrameworkElement WaitRow(TranscriptEntry entry, ToolActivity tool, long durationMs, EntryRow row)
+    {
+        var text = row.Text;
+        var duration = text.Format("ToolDuration", (durationMs / 1000d).ToString("0.#", text.Culture));
+        var waiting = row.IsLive && tool.State == ToolActivityState.Running;
+        var completed = tool.State == ToolActivityState.Completed;
+        var title = completed ? text["ToolWaitCompleted"] + " · " + duration : waiting ? text["ToolWaiting"] + " · " + duration : text.Format("ToolWaitDuration", duration);
+        if (tool.State == ToolActivityState.Failed) title = text["ToolFailed"] + " · " + title;
+        var header = (Grid)ActivityHeader(title, waiting ? ToolActivityState.Running : tool.State == ToolActivityState.Running ? ToolActivityState.Unknown : tool.State, text, categoryIcon: "\uE823");
+        if (waiting)
+        {
+            header.Children.RemoveAt(0);
+            var ring = new ProgressRing { IsActive = true, Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetName(ring, text["ToolWaiting"]); header.Children.Insert(0, ring);
+        }
+        return Expandable(entry.Id, header, row, () =>
+        {
+            var panel = new StackPanel { Spacing = 12 };
+            panel.Children.Add(new TextBlock { Text = text["ToolWaitDurationLabel"] + " · " + duration, FontSize = 13, TextWrapping = TextWrapping.Wrap });
+            var details = new StackPanel { Spacing = 8 };
+            details.Children.Add(new TextBlock { Text = text["ToolParameters"], FontSize = 12 }); details.Children.Add(Code(tool.Input));
+            if (tool.Output is { Length: > 0 } output) { details.Children.Add(new TextBlock { Text = text["ToolOutput"], FontSize = 12 }); details.Children.Add(new ScrollViewer { Content = Code(output), MaxHeight = 240 }); }
+            var copy = new Button { Content = text["Copy"], HorizontalAlignment = HorizontalAlignment.Left };
+            copy.Click += (_, _) => { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(entry.Text); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); }; details.Children.Add(copy);
+            panel.Children.Add(Expandable(entry.Id + ":details", new TextBlock { Text = text["ToolDetails"], FontSize = 13 }, row, () => details, text["ToolDetails"]));
+            return panel;
         }, title);
     }
     private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryIcon = null)
