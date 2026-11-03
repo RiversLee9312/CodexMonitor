@@ -19,6 +19,8 @@ Windows App SDK 自 1.6 支持 NativeAOT；官方说明要求适配绑定与反�
 
 因此发布检查直接运行最终 EXE，等待窗口激活并继续检查初始视图加载后的存活与响应，不能仅凭 publish 成功判断。CI 同样在打包后执行发布程序检查。还检查本机 PE 没有 CLR 入口、安装目录与发布目录文件哈希一致、PRI/XBF 齐全，以及 MSI 原位升级保留用户设置。
 
+干净 CI 主机没有 19041 SDK 的 Platform.xml，而消费已投影的 WinUI 类型不需要重新生成 Windows 投影。依据 [CsWinRT 构建属性](https://github.com/microsoft/CsWinRT/blob/master/nuget/readme.md)，项目关闭冗余的 `CsWinRTGenerateProjection`，保留 AOT 优化器、分析器和绑定源生成。移动本地 obj 后重新构建，零警告、零错误。发布脚本在 restore 后更新许可证目录，使不同 SDK 解析出的 .NET 运行时版本也能如实展示。
+
 ## 重现
 
 安装 .NET 10 SDK、Visual Studio 的“使用 C++ 的桌面开发”工具与 Windows SDK，运行：

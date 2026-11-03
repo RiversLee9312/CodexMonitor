@@ -9,6 +9,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained><SelfContained>true</SelfContained>
     <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CsWinRTGenerateProjection>false</CsWinRTGenerateProjection>
     <ApplicationManifest>..\..\src\CodexMonitor.App\app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

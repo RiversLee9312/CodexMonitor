@@ -1,4 +1,4 @@
-param([string]$AssetsFile = '')
+param([string]$AssetsFile = '', [ValidateSet('win-x64','win-arm64')][string]$Runtime = 'win-x64')
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 if (!$AssetsFile) { $AssetsFile = Join-Path $repo 'src\CodexMonitor.App\obj\project.assets.json' }
@@ -27,11 +27,12 @@ foreach ($property in $assets.libraries.PSObject.Properties | Sort-Object Name) 
     Add-Package $package[0] $package[1] $folder
 }
 # The self-contained/AOT runtime is resolved by the SDK rather than the project's normal library list.
-$runtime = $assets.project.frameworks.PSObject.Properties.Value.downloadDependencies | Where-Object name -eq 'Microsoft.NETCore.App.Runtime.win-x64' | Select-Object -First 1
-$runtimeVersion = if ($runtime) { [regex]::Match($runtime.version,'\d+\.\d+\.\d+').Value } else { '' }
+$runtimePackage = 'Microsoft.NETCore.App.Runtime.' + $Runtime
+$runtimeDependency = $assets.project.frameworks.PSObject.Properties.Value.downloadDependencies | Where-Object name -eq $runtimePackage | Select-Object -First 1
+$runtimeVersion = if ($runtimeDependency) { [regex]::Match($runtimeDependency.version,'\d+\.\d+\.\d+').Value } else { '' }
 if (!$runtimeVersion) { throw 'Cannot resolve the runtime version from restored assets' }
-$runtimeFolder = Join-Path $folders[0] "microsoft.netcore.app.runtime.win-x64\$runtimeVersion"
-Add-Package 'Microsoft.NETCore.App.Runtime.win-x64' $runtimeVersion $runtimeFolder
+$runtimeFolder = Join-Path $folders[0] ($runtimePackage.ToLowerInvariant() + '\' + $runtimeVersion)
+Add-Package $runtimePackage $runtimeVersion $runtimeFolder
 $projection = $assets.project.frameworks.PSObject.Properties.Value.downloadDependencies | Where-Object name -eq 'Microsoft.Windows.SDK.NET.Ref' | Select-Object -First 1
 if ($projection) { $version = [regex]::Match($projection.version,'\d+\.\d+\.\d+\.\d+').Value; Add-Package $projection.name $version (Join-Path $folders[0] "microsoft.windows.sdk.net.ref\$version") }
 $output = Join-Path $repo 'src\CodexMonitor.Core\Licenses\components.json'
