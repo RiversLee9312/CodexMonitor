@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CodexMonitor.Core;
 
@@ -16,6 +17,7 @@ public sealed class TranscriptParser
         var wireIds = new Dictionary<string, string>();
         var calls = new Dictionary<string, int>();
         var drafts = new Dictionary<string, TranscriptEntry>();
+        var legacyTools = new Dictionary<string, int>();
         int invalid = 0, unknown = 0, ordinal = 0;
         long tokens = 0;
         string? turnId = null;
@@ -98,7 +100,17 @@ public sealed class TranscriptParser
                                 break;
                             default:
                                 if (payload.Str("type") is "agent_reasoning" or "agent_reasoning_raw_content") drafts.Remove((turnId ?? "") + (payload.Str("type") == "agent_reasoning" ? ":summary" : ":thinking"));
-                                if (RecordedEvents.Parse(payload, id, time) is { } recorded) fallbackMessages.Add(recorded);
+                                if (RecordedEvents.Parse(payload, id, time) is { } recorded)
+                                {
+                                    var legacyCall = payload.Str("call_id");
+                                    if (recorded.Tool is not null && legacyCall.Length > 0 && legacyTools.TryGetValue(legacyCall, out var index))
+                                    {
+                                        var prior = fallbackMessages[index];
+                                        var tool = recorded.Tool.Input.Length == 0 ? recorded.Tool with { Input = prior.Tool!.Input } : recorded.Tool;
+                                        fallbackMessages[index] = recorded with { Id = prior.Id, Timestamp = prior.Timestamp, Tool = tool };
+                                    }
+                                    else { if (recorded.Tool is not null && legacyCall.Length > 0) legacyTools[legacyCall] = fallbackMessages.Count; fallbackMessages.Add(recorded); }
+                                }
                                 break;
                         }
                         break;
@@ -131,24 +143,51 @@ public sealed class TranscriptParser
         // textual mirrors one-for-one so repeated identical messages in a conversation remain distinct.
         var nativeById = nativeItems.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.Last());
         var usedNative = new HashSet<string>();
+        var matchedEntries = new HashSet<int>();
         for (int i = 0; i < entries.Count; i++)
             if (wireIds.TryGetValue(entries[i].Id, out var wireId) && nativeById.TryGetValue(wireId, out var mirror))
-            { usedNative.Add(mirror.Id); entries[i] = mirror with { Id = entries[i].Id, Timestamp = entries[i].Timestamp }; }
-        var copies = entries.GroupBy(MirrorKey).ToDictionary(g => g.Key, g => g.Count());
-        foreach (var candidates in new[] { nativeById.Values.Where(e => !usedNative.Contains(e.Id)).ToArray(), fallbackMessages.Concat(drafts.Values).ToArray() })
+            { usedNative.Add(mirror.Id); matchedEntries.Add(i); entries[i] = mirror with { Id = entries[i].Id, Timestamp = entries[i].Timestamp }; }
+        var mirrorTargets = entries.Select((entry, index) => (entry, index)).Where(pair => !matchedEntries.Contains(pair.index)).GroupBy(pair => MirrorKey(pair.entry)).ToDictionary(group => group.Key, group => new Queue<int>(group.Select(pair => pair.index)));
+        foreach (var native in nativeById.Values.Where(entry => !usedNative.Contains(entry.Id)))
         {
-            foreach (var candidate in candidates)
-            {
-                var key = MirrorKey(candidate);
-                if (copies.TryGetValue(key, out var remaining) && remaining > 0) { copies[key]--; continue; }
-                entries.Add(candidate);
-            }
-            copies = entries.GroupBy(MirrorKey).ToDictionary(g => g.Key, g => g.Count());
+            if (!mirrorTargets.TryGetValue(MirrorKey(native), out var targets) || !targets.TryDequeue(out var index)) continue;
+            usedNative.Add(native.Id);
+            if (entries[index].Tool is { } original && native.Tool is { } final)
+                entries[index] = entries[index] with { Tool = original with { DurationMs = final.DurationMs ?? original.DurationMs, Output = original.Output ?? final.Output,
+                    State = final.State == ToolActivityState.Unknown || original.State == ToolActivityState.Failed ? original.State : final.State,
+                    CategoryOverride = final.CategoryOverride ?? original.CategoryOverride, SummaryOverride = final.SummaryOverride ?? original.SummaryOverride } };
+        }
+        entries.AddRange(nativeById.Values.Where(entry => !usedNative.Contains(entry.Id)));
+        var copies = entries.GroupBy(MirrorKey).ToDictionary(g => g.Key, g => g.Count());
+        foreach (var candidate in fallbackMessages.Concat(drafts.Values))
+        {
+            var key = MirrorKey(candidate);
+            if (copies.TryGetValue(key, out var remaining) && remaining > 0) { copies[key]--; continue; }
+            entries.Add(candidate);
         }
         session = session with { State = state, ActiveTurnId = turnId };
         return new(session, entries.OrderBy(e => e.Timestamp).ToArray(), invalid, unknown, tokens);
     }
-    private static string MirrorKey(TranscriptEntry entry) => entry.Kind + ":" + (entry.Tool is { } tool ? tool.CategoryKey + ":" + tool.DecodedInput : entry.Text);
+    private static string MirrorKey(TranscriptEntry entry)
+    {
+        if (entry.Tool is not { } tool) return entry.Kind + ":" + entry.Text;
+        if (tool.CategoryKey == "ToolFileChanges")
+        {
+            var edits = new List<string>();
+            var patch = tool.DecodedInput;
+            var headers = Regex.Matches(patch, @"^\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)", RegexOptions.Multiline);
+            for (int i = 0; i < headers.Count; i++) Add(headers[i].Groups[1].Value, patch[headers[i].Index..(i + 1 < headers.Count ? headers[i + 1].Index : patch.Length)]);
+            if (edits.Count == 0)
+            {
+                try { using var changes = JsonDocument.Parse(tool.Input); foreach (var change in changes.RootElement.Items()) Add(change.Str("path"), change.Str("diff")); }
+                catch (JsonException) { }
+            }
+            if (edits.Count > 0) return "files:" + string.Join("\n", edits.Order(StringComparer.Ordinal));
+            void Add(string path, string diff) => edits.Add(path.Trim().Replace('\\', '/') + ":" + string.Join("\n", diff.Replace("\r", "").Split('\n').Where(line => line.StartsWith('+') && !line.StartsWith("+++", StringComparison.Ordinal) || line.StartsWith('-') && !line.StartsWith("---", StringComparison.Ordinal))));
+        }
+        var category = tool.Name.Split('.').Last() is "exec" or "exec_command" or "shell" or "commandExecution" ? "command" : tool.CategoryKey;
+        return "tool:" + category + ":" + tool.DecodedInput;
+    }
 
     public static SessionInfo Metadata(SessionInfo session, JsonElement p)
     {

@@ -16,6 +16,34 @@ public sealed class TranscriptTests
         return await new TranscriptParser().ReadAsync(new SessionInfo { Id = "s", FilePath = path });
     }
     [TestMethod]
+    public async Task WrappedCommandsAndInternalArgvMirrorsAppearOnceAndKeepFinalTiming()
+    {
+        var result = await Parse(
+            """{"type":"response_item","payload":{"type":"custom_tool_call","call_id":"wrapper","name":"exec","input":"text(await tools.exec_command({cmd:\"git status\"}));"}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"different-native-id","command":["C:/Program Files/PowerShell/7/pwsh.exe","-Command","git status"],"status":"Completed","aggregated_output":"Clean","exit_code":0,"duration":{"secs":2,"nanos":0}}}}""",
+            """{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":"Clean"}}""");
+        Assert.HasCount(1, result.Entries); Assert.AreEqual("git status", result.Entries[0].Tool?.Summary); Assert.AreEqual(2000L, result.Entries[0].Tool?.DurationMs); Assert.AreEqual("Clean", result.Entries[0].Tool?.Output);
+    }
+    [TestMethod]
+    public async Task WireMatchedItemsDoNotConsumeAnotherIdenticalRealExecutionOrDuplicatePatchMirrors()
+    {
+        var result = await Parse(
+            """{"type":"response_item","payload":{"type":"function_call","call_id":"first","name":"shell","arguments":"git status"}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"first","command":["git","status"],"status":"Completed"}}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"second","command":["git","status"],"status":"Completed"}}}""",
+            """{"type":"response_item","payload":{"type":"custom_tool_call","call_id":"patch","name":"exec","input":"tools.apply_patch(\"*** Begin Patch\\n*** Update File: D:/A.cs\\n@@\\n-old\\n+new\\n*** End Patch\")"}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"FileChange","id":"native-patch","status":"Completed","changes":{"D:/A.cs":{"type":"Update","unified_diff":"--- a/A.cs\n+++ b/A.cs\n@@ -1 +1 @@\n-old\n+new"}}}}}""");
+        Assert.HasCount(3, result.Entries); Assert.HasCount(2, result.Entries.Where(entry => entry.Tool?.Summary == "git status").ToArray()); Assert.HasCount(1, result.Entries.Where(entry => entry.Tool?.CategoryKey == "ToolFileChanges").ToArray());
+    }
+    [TestMethod]
+    public async Task LegacyCommandBeginAndEndCoalesceAndRetainTheCommandOnFailure()
+    {
+        var result = await Parse(
+            """{"type":"event_msg","payload":{"type":"exec_command_begin","call_id":"legacy","command":["pwsh","-NoProfile","-Command","exit 2"]}}""",
+            """{"type":"event_msg","payload":{"type":"exec_command_end","call_id":"legacy","aggregated_output":"Failed","exit_code":2}}""");
+        Assert.HasCount(1, result.Entries); Assert.AreEqual("exit 2", result.Entries[0].Tool?.Summary); Assert.AreEqual(ToolActivityState.Failed, result.Entries[0].Tool?.State); Assert.AreEqual("Failed", result.Entries[0].Tool?.Output);
+    }
+    [TestMethod]
     public async Task LegacyPartialTextRemainsReadableAndACompletedMessageReplacesItsDraft()
     {
         var result = await Parse(

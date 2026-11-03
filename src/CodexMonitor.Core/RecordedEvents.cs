@@ -47,9 +47,10 @@ public static class RecordedEvents
         if (type is "exec_command_begin" or "exec_command_end" or "mcp_tool_call_begin" or "mcp_tool_call_end" or "patch_apply_begin" or "patch_apply_end")
         {
             var name = type.StartsWith("exec_", StringComparison.Ordinal) ? "shell" : type.StartsWith("patch_", StringComparison.Ordinal) ? "apply_patch" : "mcp__" + p.Field("invocation").Str("server") + "__" + p.Field("invocation").Str("tool");
-            var input = p.Field("command").ValueKind == JsonValueKind.Array ? string.Join(" ", p.Field("command").Items().Select(x => x.TextValue())) : p.Str("command", p.Field("invocation").Field("arguments").TextValue());
+            var input = p.Field("command").ValueKind == JsonValueKind.Array ? TranscriptItemAdapter.CommandText(p.Field("command")) : p.Str("command", p.Field("invocation").Field("arguments").TextValue());
             var output = p.Str("aggregated_output", p.Str("stdout", p.Field("result").TextValue()));
             var tool = ToolActivity.FromCall(name, input, output, type.EndsWith("_end", StringComparison.Ordinal) ? ToolActivity.CompletedState(output) : ToolActivityState.Running);
+            if (p.Field("exit_code").TryNumber(out var exitCode) && exitCode != 0 || p.Field("success").ValueKind == JsonValueKind.False) tool = tool with { State = ToolActivityState.Failed };
             return new(id, EntryKind.Tool, input + "\n" + output, time, name, Tool: tool);
         }
         if (type.EndsWith("_delta", StringComparison.Ordinal) || type is "item_started" or "agent_reasoning_section_break" or "session_configured") return null;

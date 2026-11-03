@@ -44,6 +44,7 @@ public static class TranscriptItemAdapter
         type = type.Length == 0 ? type : char.ToLowerInvariant(type[0]) + type[1..];
         type = type switch { "agent_message" when item.Field("author").ValueKind == JsonValueKind.Undefined => "agentMessage", "assistant_message" => "agentMessage", "command_execution" => "commandExecution", "file_change" => "fileChange", "mcp_tool_call" => "mcpToolCall", "web_search" => "webSearch", "todo_list" or "plan_update" => "plan", _ => type };
         node["type"] = type;
+        if (type == "commandExecution" && item.Field("command").ValueKind == JsonValueKind.Array) node["command"] = CommandText(item.Field("command"));
         foreach (var (from, to) in new[] { ("summary_text","summary"), ("raw_content","content"), ("aggregated_output","aggregatedOutput"), ("exit_code","exitCode"), ("parsed_cmd","commandActions"), ("process_id","processId"), ("agent_thread_id","agentThreadId"), ("agent_path","agentPath"), ("reasoning_effort","reasoningEffort"), ("server_name","server"), ("tool_name","tool") })
             if (!node.ContainsKey(to) && node[from] is { } value) node[to] = value.DeepClone();
         if (node["status"] is JsonValue status && status.TryGetValue<string>(out var statusText) && statusText.Length > 0) node["status"] = char.ToLowerInvariant(statusText[0]) + statusText[1..];
@@ -74,6 +75,19 @@ public static class TranscriptItemAdapter
         if (type == "plan" && !node.ContainsKey("plan") && item.Field("items").ValueKind == JsonValueKind.Array)
             node["plan"] = new JsonArray(item.Field("items").Items().Select(step => (JsonNode)new JsonObject { ["step"] = step.Str("text", step.Str("step")), ["status"] = step.Field("completed").ValueKind == JsonValueKind.True ? "completed" : step.Str("status", "pending") }).ToArray());
         using var normalized = JsonDocument.Parse(node.ToJsonString()); return normalized.RootElement.Clone();
+    }
+    internal static string CommandText(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Array) return value.TextValue();
+        var args = value.Items().Select(argument => argument.TextValue()).ToArray();
+        if (args.Length >= 3)
+        {
+            var shell = Path.GetFileNameWithoutExtension(args[0].Replace('\\', '/')).ToLowerInvariant();
+            if (shell is "pwsh" or "powershell" or "bash" or "sh" or "zsh" or "cmd")
+                for (int i = 1; i < args.Length - 1; i++)
+                    if (args[i].Equals("-Command", StringComparison.OrdinalIgnoreCase) || args[i] is "-c" or "-lc" || args[i].Equals("/c", StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+        }
+        return string.Join(" ", args.Select(argument => argument.Any(char.IsWhiteSpace) ? JsonSerializer.Serialize(argument, CoreJsonContext.Default.String) : argument));
     }
     public static string PlainText(JsonElement content)
     {

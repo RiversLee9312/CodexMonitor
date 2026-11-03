@@ -29,7 +29,7 @@ dotnet run --project .\src\CodexMonitor.App -p:Platform=x64
 .\scripts\Build-Installer.ps1
 ```
 
-输出为 `artifacts\installer\CodexMonitor-0.1.6-win-x64.msi`，附带 SHA-256 校验文件。MSI 按当前用户安装到 `%LOCALAPPDATA%\Programs\CodexMonitor`，提供开始菜单入口和 Windows“已安装的应用”卸载项。使用时无需安装 .NET 或开发 SDK。构建脚本会在项目的临时工具目录安装固定版本 WiX 4.0.6。体积优化与验证见 [发布体积记录](docs/deployment-size.md)。
+输出为 `artifacts\installer\CodexMonitor-0.1.7-win-x64.msi`，附带 SHA-256 校验文件。MSI 按当前用户安装到 `%LOCALAPPDATA%\Programs\CodexMonitor`，提供开始菜单入口和 Windows“已安装的应用”卸载项。使用时无需安装 .NET 或开发 SDK。构建脚本会在项目的临时工具目录安装固定版本 WiX 4.0.6。体积优化与验证见 [发布体积记录](docs/deployment-size.md)。
 
 ## 查看会话
 

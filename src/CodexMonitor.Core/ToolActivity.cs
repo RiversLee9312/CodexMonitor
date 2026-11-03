@@ -32,6 +32,11 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             catch (JsonException) { }
             var patch = Regex.Match(value, "apply_patch\\(\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
             if (patch.Success) { try { return JsonSerializer.Deserialize(patch.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { } }
+            if (Name.Split('.').Last() is "exec" or "exec_command" || value.Contains("exec_command", StringComparison.Ordinal))
+            {
+                var command = Regex.Match(value, "(?:cmd|command)\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
+                if (command.Success) { try { return JsonSerializer.Deserialize(command.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { } }
+            }
             return value;
         }
     }
