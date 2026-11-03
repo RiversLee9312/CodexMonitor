@@ -187,20 +187,39 @@ public sealed partial class TranscriptCard : UserControl
         var positions = Content is DependencyObject previous ? VisualChildren(previous).OfType<ScrollViewer>()
             .Select(scroll => (scroll.VerticalOffset, AtEnd: scroll.ScrollableHeight - scroll.VerticalOffset < 24)).ToArray() : [];
         Render();
-        if (positions.Length > 0 || focused is not null)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        if ((positions.Length > 0 || focused is not null) && Content is FrameworkElement replacement)
+        {
+            var restoring = false; var focusRestored = false;
+            void Detach() { replacement.LayoutUpdated -= Restore; replacement.Loaded -= Loaded; replacement.Unloaded -= Unloaded; }
+            void Loaded(object sender, RoutedEventArgs args) => Restore(null, new object());
+            void Unloaded(object sender, RoutedEventArgs args) => Detach();
+            void Restore(object? sender, object args)
             {
-                if (!IsLoaded || Content is not FrameworkElement content) return;
-                content.UpdateLayout(); var children = VisualChildren(content).ToArray();
-                var scrolls = children.OfType<ScrollViewer>().ToArray();
-                for (int i = 0; i < Math.Min(positions.Length, scrolls.Length); i++)
-                    scrolls[i].ChangeView(null, positions[i].AtEnd && Row?.CanFollow?.Invoke() == true ? scrolls[i].ScrollableHeight : positions[i].VerticalOffset, null, true);
-                if (focused is not null)
+                if (restoring) return;
+                if (!ReferenceEquals(Content, replacement)) { Detach(); return; }
+                if (!IsLoaded || !replacement.IsLoaded) return;
+                restoring = true;
+                try
                 {
-                    var target = children.OfType<Control>().FirstOrDefault(control => focusId.Length > 0 ? AutomationProperties.GetAutomationId(control) == focusId : control.GetType() == focused.GetType() && AutomationProperties.GetName(control) == focusName);
-                    target?.Focus(FocusState.Programmatic);
+                    replacement.UpdateLayout(); var children = VisualChildren(replacement).ToArray();
+                    if (focused is not null && !focusRestored)
+                    {
+                        var target = children.OfType<Control>().FirstOrDefault(control => focusId.Length > 0 ? AutomationProperties.GetAutomationId(control) == focusId : control.GetType() == focused.GetType() && AutomationProperties.GetName(control) == focusName);
+                        target?.Focus(FocusState.Programmatic); focusRestored = true;
+                    }
+                    var scrolls = children.OfType<ScrollViewer>().ToArray();
+                    // A replacement ScrollPresenter can still have zero extent on the first dispatcher callback.
+                    // Wait for its loaded layout; otherwise ChangeView silently clamps a saved offset to zero.
+                    if (scrolls.Any(scroll => !scroll.IsLoaded || scroll.ViewportHeight <= 0 || scroll.ExtentHeight <= 0)) return;
+                    for (int i = 0; i < Math.Min(positions.Length, scrolls.Length); i++)
+                        scrolls[i].ChangeView(null, positions[i].AtEnd && Row?.CanFollow?.Invoke() == true ? scrolls[i].ScrollableHeight : positions[i].VerticalOffset, null, true);
+                    Detach();
                 }
-            });
+                finally { restoring = false; }
+            }
+            replacement.LayoutUpdated += Restore; replacement.Loaded += Loaded; replacement.Unloaded += Unloaded;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => Restore(null, new object()));
+        }
     }
     internal static void PreserveScroll(DependencyObject container, EntryRow row)
     {

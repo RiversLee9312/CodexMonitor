@@ -104,14 +104,17 @@ public sealed class SessionListTests
         Assert.IsTrue(await window.ActivityAtEndFollowsNewItemsReviewAsync(), "A reader already at the end should see appended calls naturally");
     }
     [UITestMethod]
-    public async Task ExpandedOutputKeepsScrollAndKeyboardFocusWhenItsContentStreams()
+    [DataRow(1180, 800)]
+    [DataRow(760, 650)]
+    [DataRow(560, 700)]
+    public async Task ExpandedOutputKeepsScrollAndKeyboardFocusWhenItsContentStreams(int width, int height)
     {
-        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(width, height, "Dark", "zh-CN");
         var result = await window.ExpandedOutputUpdateReviewAsync();
         Assert.IsGreaterThan(0d, result.Before); Assert.AreEqual(result.Before, result.After, 2d);
         Assert.IsTrue(result.Expanded); Assert.IsTrue(result.Focused);
         Assert.IsTrue(window.ReviewVisualElements<Microsoft.UI.Xaml.Controls.ScrollViewer>().All(s => s.IsVerticalScrollChainingEnabled));
-        TestContext.AddResultFile(await window.CaptureReviewAsync("streaming-output-reading-position"));
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"streaming-output-reading-position-{width}"));
     }
     [UITestMethod]
     [DataRow(SessionState.Active, true, false, true)]
