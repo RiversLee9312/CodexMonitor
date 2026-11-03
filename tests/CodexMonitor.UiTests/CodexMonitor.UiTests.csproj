@@ -1,0 +1,24 @@
+<Project Sdk="MSTest.Sdk/4.5.1">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>CodexMonitor.UiTests</RootNamespace>
+    <Platforms>x64</Platforms><Platform>x64</Platform><RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI><WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained><SelfContained>true</SelfContained>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <ApplicationManifest>..\..\src\CodexMonitor.App\app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5"/>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654"/>
+    <ProjectReference Include="..\..\src\CodexMonitor.Core\CodexMonitor.Core.csproj"/>
+    <!-- Compile the production view and styles, rather than a replica used only by tests. -->
+    <Compile Include="..\..\src\CodexMonitor.App\MainWindow.xaml.cs" Link="MainWindow.xaml.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\Presentation.cs" Link="Presentation.cs"/>
+    <Page Include="..\..\src\CodexMonitor.App\MainWindow.xaml" Link="MainWindow.xaml"/>
+    <Page Include="..\..\src\CodexMonitor.App\Styles.xaml" Link="Styles.xaml"/>
+    <Content Include="..\..\src\CodexMonitor.App\Assets\*" Link="Assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,138 @@
+<Window x:Class="CodexMonitor.App.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="using:CodexMonitor.App">
+  <Grid x:Name="Root" Loaded="OnLoaded" SizeChanged="OnSizeChanged" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/><RowDefinition Height="32"/></Grid.RowDefinitions>
+    <Grid x:Name="TitleBar" Background="Transparent" Margin="16,0,140,0" FlowDirection="LeftToRight">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Image Source="Assets/AppIcon.png" Width="22" Height="22" AutomationProperties.AccessibilityView="Raw"/>
+      <TextBlock x:Name="AppTitle" Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0" Style="{ThemeResource CaptionTextBlockStyle}"/>
+    </Grid>
+    <SplitView x:Name="Shell" Grid.Row="1" IsPaneOpen="True" DisplayMode="Inline" OpenPaneLength="320" PaneBackground="{ThemeResource SolidBackgroundFillColorBaseBrush}" LightDismissOverlayMode="On">
+      <SplitView.Pane>
+        <Grid Padding="16,12,12,8" RowSpacing="12">
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="SessionsHeading" Style="{ThemeResource SubtitleTextBlockStyle}" VerticalAlignment="Center"/>
+            <Button x:Name="NewButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnNewSession"><FontIcon Glyph="&#xE710;" FontSize="16"/></Button>
+          </Grid>
+          <AutoSuggestBox x:Name="SessionSearch" Grid.Row="1" TextChanged="OnSessionSearchChanged" QueryIcon="Find" MinHeight="40"/>
+          <Grid Grid.Row="2" ColumnSpacing="12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="SessionFilter" HorizontalAlignment="Stretch" SelectionChanged="OnFilterChanged" MinHeight="36"/>
+            <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon Glyph="&#xE72C;" FontSize="16"/></Button>
+          </Grid>
+          <Grid Grid.Row="3">
+            <ListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
+              <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></ListView.ItemContainerStyle>
+              <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:SessionRow">
+                  <Grid RowSpacing="5" ToolTipService.ToolTip="{x:Bind AccessibleName, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid ColumnSpacing="8">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                      <Ellipse x:Name="UpdateDot" Grid.Column="1" Width="7" Height="7" VerticalAlignment="Center" Fill="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind UpdatedVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind UpdatedText, Mode=OneWay}" AutomationProperties.Name="{x:Bind UpdatedText, Mode=OneWay}"/>
+                    </Grid>
+                    <TextBlock Grid.Row="1" Text="{x:Bind Folder, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                    <Grid Grid.Row="2">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <FontIcon x:Name="RunningGlyph" Glyph="&#xE768;" FontSize="11" VerticalAlignment="Center" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind RunningVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind RunningText, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw"/>
+                        <TextBlock Grid.Column="1" Text="{x:Bind State, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                      </Grid>
+                      <TextBlock Grid.Column="1" Text="{x:Bind Time, Mode=OneWay}" Margin="8,0,0,0" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    </Grid>
+                  </Grid>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+            <StackPanel x:Name="NoSessionsPanel" Visibility="Collapsed" VerticalAlignment="Center" Spacing="8" Margin="8">
+              <TextBlock x:Name="NoSessionsTitle" TextWrapping="Wrap" FontWeight="SemiBold"/>
+              <TextBlock x:Name="NoSessionsHint" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
+          </Grid>
+          <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button x:Name="ConnectButton" HorizontalAlignment="Stretch" MinHeight="40" Click="OnConnect"/>
+            <Button x:Name="SettingsButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnSettings"><FontIcon Glyph="&#xE713;" FontSize="18"/></Button>
+          </Grid>
+        </Grid>
+      </SplitView.Pane>
+      <Border Margin="0,8,12,0" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <InfoBar x:Name="Notice" IsOpen="False" IsClosable="True" Margin="12,12,12,0" Severity="Informational"/>
+          <Grid Grid.Row="1" Margin="16,12" ColumnSpacing="12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Button x:Name="PaneButton" Style="{StaticResource IconButtonStyle}" Visibility="Collapsed" Click="OnTogglePane" VerticalAlignment="Top"><FontIcon Glyph="&#xE700;" FontSize="16"/></Button>
+            <StackPanel Grid.Column="1" Spacing="4">
+              <TextBlock x:Name="SessionTitle" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
+              <TextBlock x:Name="SessionSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+              <Button x:Name="FindButton" Style="{StaticResource IconButtonStyle}" Click="OnFind"><FontIcon Glyph="&#xE721;" FontSize="16"/></Button>
+              <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}"><FontIcon Glyph="&#xE712;" FontSize="16"/>
+                <Button.Flyout><MenuFlyout>
+                  <MenuFlyoutItem x:Name="DetailsMenu" Click="OnDetails"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="ExportMenu" Click="OnExport"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="OpenFolderMenu" Click="OnOpenFolder"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE838;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                </MenuFlyout></Button.Flyout>
+              </Button>
+            </StackPanel>
+          </Grid>
+          <Grid Grid.Row="2">
+            <StackPanel x:Name="WelcomePanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="400" Margin="32" Spacing="12">
+              <FontIcon Glyph="&#xE8A5;" FontSize="36" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" AutomationProperties.AccessibilityView="Raw"/>
+              <TextBlock x:Name="WelcomeTitle" Style="{ThemeResource SubtitleTextBlockStyle}" TextAlignment="Center" TextWrapping="Wrap"/>
+              <TextBlock x:Name="WelcomeHint" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Grid x:Name="Conversation" Visibility="Collapsed">
+              <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+              <Grid x:Name="FindPanel" Visibility="Collapsed" Margin="24,0,24,12" ColumnSpacing="8">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBox x:Name="TranscriptSearch" TextChanged="OnTranscriptSearchChanged" MinHeight="40"/>
+                <Button x:Name="CloseFindButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnCloseFind"><FontIcon Glyph="&#xE711;" FontSize="14"/></Button>
+              </Grid>
+              <Grid Grid.Row="1">
+                <ListView x:Name="MessageList" Background="Transparent" SelectionMode="None" IsItemClickEnabled="False" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></ListView.ItemContainerStyle>
+                  <ListView.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></ListView.ItemTemplate>
+                </ListView>
+                <TextBlock x:Name="NoMessagesText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+              </Grid>
+              <Grid Grid.Row="2" Margin="24,0,24,8" ColumnSpacing="12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <CheckBox x:Name="ToolsCheck" IsChecked="True" Click="OnToolsChanged" MinHeight="32"/>
+                <Button x:Name="LatestButton" Grid.Column="1" Visibility="Collapsed" Click="OnLatest"/>
+              </Grid>
+              <Border Grid.Row="3" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="24,16,24,18">
+                <Grid MaxWidth="920" RowSpacing="10">
+                  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                  <Button x:Name="ResumeButton" HorizontalAlignment="Left" Click="OnResume"/>
+                  <TextBox x:Name="Composer" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxHeight="200" ScrollViewer.VerticalScrollBarVisibility="Auto" TextChanged="OnComposerChanged"/>
+                  <Grid Grid.Row="2" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="ComposerHint" VerticalAlignment="Center" TextWrapping="Wrap" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    <Button x:Name="StopButton" Grid.Column="1" Click="OnStop" MinHeight="40"/>
+                    <Button x:Name="SendButton" Grid.Column="2" Click="OnSend" Style="{StaticResource AccentButtonStyle}" MinHeight="40" MinWidth="88"/>
+                  </Grid>
+                </Grid>
+              </Border>
+            </Grid>
+          </Grid>
+        </Grid>
+      </Border>
+    </SplitView>
+    <Grid Grid.Row="2" Margin="20,0" ColumnSpacing="12">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBlock x:Name="ConnectionStatus" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+      <TextBlock x:Name="ActivityNote" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+      <TextBlock x:Name="SessionCount" Grid.Column="2" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.LiveSetting="Polite"/>
+    </Grid>
+  </Grid>
+</Window>

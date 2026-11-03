@@ -1,0 +1,29 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run MSTest core tests
+        shell: pwsh
+        run: ./scripts/Test.ps1
+      - name: Build Release and MSI
+        shell: pwsh
+        run: ./scripts/Build-Installer.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64
+          path: |
+            artifacts/installer/*.msi
+            artifacts/installer/*.sha256
+            artifacts/test-results/*.trx
