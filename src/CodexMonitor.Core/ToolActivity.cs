@@ -117,7 +117,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         {
             "commandExecution" => Command(item, state, duration),
             "sleep" => FromCall("clock.sleep", new JsonObject { ["durationMs"] = JsonNode.Parse(item.Field("durationMs").TextValue() is { Length: > 0 } value ? value : "null") }.ToJsonString(), state: state),
-            "fileChange" => new(type, item.Field("changes").TextValue(), State: state, DurationMs: duration,
+            "fileChange" => new(type, item.Field("changes").TextValue(), string.Join("\n", new[] { item.Str("stdout"), item.Str("stderr") }.Where(value => value.Length > 0)), State: state, DurationMs: duration,
                 SummaryOverride: string.Join(", ", item.Field("changes").Items().Select(c => Path.GetFileName(c.Str("path").Replace('/', Path.DirectorySeparatorChar)))), CategoryOverride: "ToolFileChanges"),
             "webSearch" or "web_search_call" => Web(item, state, duration),
             "mcpToolCall" => FromCall(Qualify(item.Str("server"), item.Str("tool", type)), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration, "ToolMcp", string.Join(" · ", new[] { item.Field("appContext").Str("appName", item.Str("server")), item.Field("appContext").Str("actionName", item.Str("tool")) }.Where(s => s.Length > 0))),

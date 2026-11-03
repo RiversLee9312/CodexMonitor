@@ -8,6 +8,16 @@ namespace CodexMonitor.Core.Tests;
 public sealed class ProtocolCoverageTests
 {
     [TestMethod]
+    public void InternalFileMapsAndConnectorContextNormalizeWithoutLosingDiffsErrorsOrTiming()
+    {
+        using var patch = JsonDocument.Parse("""{"id":"p","type":"FileChange","status":"Completed","changes":{"D:/New.cs":{"type":"Add","content":"first\nsecond\n"},"D:/Old.cs":{"type":"Update","unified_diff":"@@\n-old\n+new","move_path":"D:/Renamed.cs"}},"stdout":"Applied","stderr":""}""");
+        var activity = TranscriptItemAdapter.Parse(patch.RootElement).Tool!;
+        var parts = activity.DisplayParts(); Assert.HasCount(2, parts); Assert.AreEqual("New.cs", parts[0].Summary); Assert.AreEqual(2, parts[0].AddedLines);
+        Assert.AreEqual(1, parts[1].AddedLines); Assert.AreEqual(1, parts[1].RemovedLines); Assert.AreEqual("Applied", activity.Output);
+        using var mcp = JsonDocument.Parse("""{"id":"m","type":"McpToolCall","server":"github","tool":"search","appName":"GitHub","actionName":"Search code","duration":{"secs":2,"nanos":0},"status":"Completed","result":{"isError":true,"content":[{"type":"text","text":"Unavailable"}]}}""");
+        var call = TranscriptItemAdapter.Parse(mcp.RootElement).Tool!; Assert.AreEqual("GitHub · Search code", call.Summary); Assert.AreEqual(2000L, call.DurationMs); Assert.AreEqual(ToolActivityState.Failed, call.State);
+    }
+    [TestMethod]
     public void RealtimeSegmentsKeepEarlierUtterancesAndUserDirectionAcrossSeveralTurns()
     {
         IReadOnlyList<TranscriptEntry> entries = Array.Empty<TranscriptEntry>();

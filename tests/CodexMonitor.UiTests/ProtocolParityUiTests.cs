@@ -13,6 +13,21 @@ public sealed class ProtocolParityUiTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
+    [DataRow("Light", "zh-CN")]
+    [DataRow("Dark", "ar-SA")]
+    public async Task InternalFileChangesRenderAsReadableFileRowsAndDiffs(string theme, string language)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
+        using var document = JsonDocument.Parse("""{"id":"patch","type":"FileChange","status":"Completed","changes":{"D:/New.cs":{"type":"Add","content":"first\nsecond\n"}},"stdout":"Applied"}""");
+        await window.ShowProtocolEntryReviewAsync(CodexClient.ParseItem(document.RootElement));
+        foreach (var disclosure in window.ReviewVisualElements<ActivityDisclosure>()) disclosure.SetExpanded(true);
+        await MainWindow.SettleAsync();
+        var content = string.Join("\n", window.ReviewVisualElements<TextBlock>().Select(t => t.Text));
+        StringAssert.Contains(content, "New.cs"); StringAssert.Contains(content, "+first"); StringAssert.Contains(content, "+second"); StringAssert.Contains(content, "Applied");
+        Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])));
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"native-file-map-{theme}-{language}"));
+    }
+    [UITestMethod]
     [DataRow("Light", "zh-CN", false)]
     [DataRow("Dark", "de-DE", true)]
     [DataRow("Dark", "ar-SA", false)]

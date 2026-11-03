@@ -51,6 +51,25 @@ public static class TranscriptItemAdapter
             node["durationMs"] = seconds * 1000 + (item.Field("duration").Field("nanos").TryNumber(out var nanos) ? nanos / 1000000 : 0);
         if (node["commandActions"] is JsonArray actions)
             foreach (var action in actions.OfType<JsonObject>()) if (action["type"] is JsonValue kind && kind.TryGetValue<string>(out var actionType) && actionType.Length > 0) action["type"] = char.ToLowerInvariant(actionType[0]) + actionType[1..];
+        if (type == "fileChange" && item.Field("changes").ValueKind == JsonValueKind.Object)
+        {
+            var changes = new JsonArray();
+            foreach (var change in item.Field("changes").EnumerateObject())
+            {
+                var kind = change.Value.Str("type").ToLowerInvariant();
+                var diff = change.Value.Str("unified_diff", change.Value.Str("diff"));
+                if (diff.Length == 0 && change.Value.Field("content").ValueKind == JsonValueKind.String)
+                {
+                    var content = change.Value.Str("content").Replace("\r\n", "\n", StringComparison.Ordinal);
+                    var lines = content.EndsWith('\n') ? content[..^1].Split('\n') : content.Split('\n');
+                    diff = content.Length == 0 ? "" : string.Join("\n", lines.Select(line => (kind == "delete" ? "-" : "+") + line));
+                }
+                changes.Add(new JsonObject { ["path"] = change.Name, ["diff"] = diff, ["kind"] = new JsonObject { ["type"] = kind, ["move_path"] = change.Value.Str("move_path") } });
+            }
+            node["changes"] = changes;
+        }
+        if (type == "mcpToolCall" && !node.ContainsKey("appContext") && item.Field("appName").ValueKind == JsonValueKind.String)
+            node["appContext"] = new JsonObject { ["appName"] = item.Str("appName"), ["actionName"] = item.Str("actionName", item.Str("tool")) };
         if (type == "agentMessage" && !node.ContainsKey("text")) node["text"] = PlainText(item.Field("content"));
         if (type == "plan" && !node.ContainsKey("plan") && item.Field("items").ValueKind == JsonValueKind.Array)
             node["plan"] = new JsonArray(item.Field("items").Items().Select(step => (JsonNode)new JsonObject { ["step"] = step.Str("text", step.Str("step")), ["status"] = step.Field("completed").ValueKind == JsonValueKind.True ? "completed" : step.Str("status", "pending") }).ToArray());
