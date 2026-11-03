@@ -27,14 +27,17 @@ public sealed class StdioTransport : IRpcTransport
     }
 
     public static StdioTransport Start(string executable, string codexHome)
+        => StartProcess(executable, codexHome, ["app-server", "--listen", "stdio://"]);
+
+    private static StdioTransport StartProcess(string executable, string codexHome, IEnumerable<string> arguments)
     {
         var resolved = ResolveExecutable(executable);
+        Directory.CreateDirectory(codexHome);
         var start = new ProcessStartInfo(resolved) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8,
             WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) };
-        start.ArgumentList.Add("app-server");
-        start.ArgumentList.Add("--listen"); start.ArgumentList.Add("stdio://");
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["CODEX_HOME"] = Path.GetFullPath(codexHome);
         return new(Process.Start(start) ?? throw new IOException("Unable to start Codex"));
     }
@@ -46,6 +49,8 @@ public sealed class StdioTransport : IRpcTransport
         var candidates = Path.IsPathFullyQualified(executable) ? new[] { executable } :
             (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).SelectMany(dir =>
                 new[] { Path.Combine(dir, executable + ".exe"), Path.Combine(dir, executable + ".cmd"), Path.Combine(dir, executable) }).ToArray();
+        if (OperatingSystem.IsWindows() && (executable.Equals("codex", StringComparison.OrdinalIgnoreCase) || executable.Equals("codex.exe", StringComparison.OrdinalIgnoreCase)))
+            candidates = candidates.Concat([Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OpenAI", "Codex", "bin", "codex.exe")]).ToArray();
         foreach (var candidate in candidates)
         {
             if (!File.Exists(candidate)) continue;
@@ -83,9 +88,12 @@ public sealed class StdioTransport : IRpcTransport
     }
 }
 
+public sealed class ServerAuthenticationRequiredException() : IOException("The app server requires authentication");
+
 public sealed class WebSocketTransport : IRpcTransport
 {
     private readonly ClientWebSocket _socket = new();
+    private HttpMessageInvoker? _http;
     public static bool IsAllowedEndpoint(string address) => Uri.TryCreate(address, UriKind.Absolute, out var uri) &&
         uri.Scheme is "ws" or "wss" && uri.IsLoopback && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment);
 
@@ -93,8 +101,38 @@ public sealed class WebSocketTransport : IRpcTransport
     {
         if (!IsAllowedEndpoint(endpoint)) throw new ArgumentException("Only loopback WebSocket endpoints are supported", nameof(endpoint));
         var t = new WebSocketTransport();
+        t._socket.Options.Proxy = null;
+        t._socket.Options.CollectHttpResponseDetails = true;
         try { await t._socket.ConnectAsync(new Uri(endpoint), ct).ConfigureAwait(false); return t; }
+        catch (WebSocketException) when (t._socket.HttpStatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        { t._socket.Dispose(); throw new ServerAuthenticationRequiredException(); }
         catch { t._socket.Dispose(); throw; }
+    }
+    public static async Task<WebSocketTransport> ConnectLocalSocketAsync(string path, CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("A local absolute socket path is required", nameof(path));
+        var transport = new WebSocketTransport();
+        transport._http = new HttpMessageInvoker(new SocketsHttpHandler
+        {
+            UseProxy = false, AllowAutoRedirect = false,
+            ConnectCallback = async (_, token) =>
+            {
+                var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.Unix, System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Unspecified);
+                try
+                {
+                    await socket.ConnectAsync(new System.Net.Sockets.UnixDomainSocketEndPoint(path), token).ConfigureAwait(false);
+                    return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+                }
+                catch { socket.Dispose(); throw; }
+            }
+        });
+        transport._socket.Options.CollectHttpResponseDetails = true;
+        try
+        {
+            await transport._socket.ConnectAsync(new Uri("ws://localhost/"), transport._http, ct).ConfigureAwait(false);
+            return transport;
+        }
+        catch { await transport.DisposeAsync().ConfigureAwait(false); throw; }
     }
     public async Task SendAsync(string message, CancellationToken ct) =>
         await _socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
@@ -113,5 +151,5 @@ public sealed class WebSocketTransport : IRpcTransport
         } while (!result.EndOfMessage);
         return Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
     }
-    public ValueTask DisposeAsync() { _socket.Abort(); _socket.Dispose(); return ValueTask.CompletedTask; }
+    public ValueTask DisposeAsync() { _socket.Abort(); _socket.Dispose(); _http?.Dispose(); return ValueTask.CompletedTask; }
 }

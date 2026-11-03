@@ -7,10 +7,12 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
 {
     public JsonRpcClient Rpc { get; } = rpc;
     public bool IsConnected => Rpc.IsConnected;
+    public string UserAgent { get; private set; } = "";
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.0" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.1" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new { }, ct).ConfigureAwait(false);
     }
     public async Task<IReadOnlyList<SessionInfo>> ListAsync(CancellationToken ct = default)

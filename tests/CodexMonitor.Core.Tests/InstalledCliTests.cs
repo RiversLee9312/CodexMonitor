@@ -8,6 +8,16 @@ public sealed class InstalledCliTests
 {
     [TestMethod]
     [TestCategory("Integration")]
+    public async Task DiscoveryCanFindAnExistingLocalDaemonWithoutStartingTurns()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_MONITOR_INTEGRATION") != "1" || !File.Exists(SharedServerEndpoint.DefaultSocketPath(LocalSessionStore.DefaultHome)))
+            Assert.Inconclusive("Requires an already running local Codex daemon and opt-in integration tests.");
+        var result = await new LocalServerDiscovery().FindAsync(LocalSessionStore.DefaultHome, "codex");
+        Assert.IsTrue(result.Any(s => s.Endpoint == "unix://" && s.CanConnect), "The existing daemon must pass the Codex initialize handshake.");
+        Console.WriteLine($"Discovered {result.Count} existing local servers; no turns started.");
+    }
+    [TestMethod]
+    [TestCategory("Integration")]
     public async Task InstalledCliCanInitializeAndListWithoutStartingInference()
     {
         if (Environment.GetEnvironmentVariable("CODEX_MONITOR_INTEGRATION") != "1") Assert.Inconclusive("Set CODEX_MONITOR_INTEGRATION=1 to test the installed CLI.");

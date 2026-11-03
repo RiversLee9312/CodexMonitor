@@ -19,6 +19,9 @@ public sealed partial class MainWindow : Window
     private AppSettings _settings = AppSettings.Load();
     private LocalizationService _text;
     private LocalSessionStore _store;
+    private IServerDiscovery _serverDiscovery = new LocalServerDiscovery();
+    private ICodexHomeDiscovery _homeDiscovery = new CodexHomeDiscovery();
+    private Func<string, string> _resolveExecutable = StdioTransport.ResolveExecutable;
     private CodexClient? _client;
     private IReadOnlyList<SessionInfo> _sessions = [];
     private SessionInfo? _selected;
@@ -40,6 +43,7 @@ public sealed partial class MainWindow : Window
     private ScrollViewer? _messageScroll;
     private bool _ready, _syncing, _connecting, _sending, _following = true, _closing;
     private readonly bool _reviewMode;
+    private bool _cliMissing;
     private long _selectedLength = -1;
 
     public MainWindow() : this(false) { }
@@ -108,7 +112,7 @@ public sealed partial class MainWindow : Window
         var width = Math.Min((int)(1180 * scale), area.Width - 48);
         var height = Math.Min((int)(800 * scale), area.Height - 48);
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(area.X + (area.Width - width) / 2, area.Y + (area.Height - height) / 2, width, height));
-        _ready = true; await RefreshAsync(true); _timer.Start();
+        _ready = true; await RefreshAsync(true); _timer.Start(); await CheckCliWelcomeAsync();
     }
     private void Localize()
     {
@@ -132,7 +136,7 @@ public sealed partial class MainWindow : Window
         Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessagePlaceholder"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
         NoSessionsTitle.Text = _text["NoSessions"]; NoSessionsHint.Text = _text["NoSessionsHint"];
-        WelcomeTitle.Text = _text["SelectSession"]; WelcomeHint.Text = _text["SelectSessionHint"];
+        WelcomeTitle.Text = _text["SelectSession"]; ApplyCliWelcomeState();
         NoMessagesText.Text = _text["NoMessages"]; ResumeButton.Content = _text["Resume"];
         StopButton.Content = _text["Interrupt"];
         UpdateChrome(); UpdateTitle(); RenderMessages(true); ApplyFilter(true);
@@ -341,7 +345,8 @@ public sealed partial class MainWindow : Window
             !attached && _selected?.State == SessionState.RecordedActive ? "ExternalActiveHint" : !attached ? "ResumeHint" : canSteer ? "SteerHint" : "SendHint"];
     }
     private void OnComposerChanged(object sender, TextChangedEventArgs e) { if (_ready) UpdateChrome(); }
-    private async void OnConnect(object sender, RoutedEventArgs e)
+    private async void OnConnect(object sender, RoutedEventArgs e) => await ConnectAsync();
+    private async Task ConnectAsync()
     {
         if (_connecting) return;
         _connecting = true; UpdateChrome();
@@ -351,8 +356,9 @@ public sealed partial class MainWindow : Window
             if (_client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); }
             if (!wasConnected)
             {
+                if (!_settings.UseSharedServer) _resolveExecutable(_settings.Executable);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); timeout.CancelAfter(TimeSpan.FromSeconds(15));
-                IRpcTransport transport = _settings.UseSharedServer ? await WebSocketTransport.ConnectAsync(_settings.Endpoint, timeout.Token) : StdioTransport.Start(_settings.Executable, _settings.CodexHome);
+                IRpcTransport transport = _settings.UseSharedServer ? await SharedServerEndpoint.ConnectAsync(_settings.Endpoint, _settings.CodexHome, _settings.Executable, timeout.Token) : StdioTransport.Start(_settings.Executable, _settings.CodexHome);
                 var client = new CodexClient(new JsonRpcClient(transport));
                 client.Rpc.Message += message => DispatcherQueue.TryEnqueue(() => HandleMessage(client, message));
                 client.Rpc.Disconnected += _ => DispatcherQueue.TryEnqueue(() => { if (!_closing && ReferenceEquals(_client, client)) { _attached.Clear(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning); } });
@@ -361,6 +367,8 @@ public sealed partial class MainWindow : Window
             }
             Notice.IsOpen = false; await RefreshAsync(true);
         }
+        catch (FileNotFoundException) when (!_settings.UseSharedServer)
+        { await ShowCliSetupAsync(); }
         catch (Exception ex) when (ex is IOException or ArgumentException or System.Net.WebSockets.WebSocketException or RpcException or OperationCanceledException or System.ComponentModel.Win32Exception)
         { NoticeText("ConnectionFailed", InfoBarSeverity.Error); }
         finally { _connecting = false; UpdateChrome(); }
@@ -588,16 +596,64 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or RpcException or OperationCanceledException) { NoticeText("ConnectionFailed", InfoBarSeverity.Error); }
     }
     private async void OnSettings(object sender, RoutedEventArgs e) => await SettingsAsync();
+    private void ApplyCliWelcomeState()
+    {
+        WelcomeHint.Text = _text[_cliMissing ? "CliNotInstalled" : "SelectSessionHint"];
+        SetupCodexButton.Content = _text["CliSetupTitle"];
+        SetupCodexButton.Visibility = _cliMissing ? Visibility.Visible : Visibility.Collapsed;
+    }
+    private async Task CheckCliWelcomeAsync()
+    {
+        _cliMissing = !_settings.UseSharedServer && !await Task.Run(() =>
+        {
+            try { _resolveExecutable(_settings.Executable); return true; }
+            catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException or NotSupportedException or System.ComponentModel.Win32Exception) { return false; }
+        });
+        if (!_closing) ApplyCliWelcomeState();
+    }
+    private async void OnSetupCodex(object sender, RoutedEventArgs e) => await ShowCliSetupAsync();
+    private async Task<string?> PickExecutableAsync()
+    {
+        var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".exe"); picker.FileTypeFilter.Add(".cmd");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        return (await picker.PickSingleFileAsync())?.Path;
+    }
+    private async Task ShowCliSetupAsync()
+    {
+        using var setup = new CliSetupPanel(_settings.Executable, _text, PickExecutableAsync, _lifetime.Token, _resolveExecutable);
+        var content = new StackPanel { Spacing = 20, MaxWidth = 520 };
+        content.Children.Add(new TextBlock { Text = _text["CliSetupHelp"], TextWrapping = TextWrapping.Wrap }); content.Children.Add(setup);
+        var dialog = new ContentDialog { Title = _text["CliSetupTitle"], Content = new ScrollViewer { Content = content, MaxHeight = 530 }, PrimaryButtonText = _text["Save"], CloseButtonText = _text["Cancel"] };
+        dialog.Opened += async (_, _) => await setup.CheckAsync();
+        if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary)
+        {
+            _settings = _settings with { Executable = setup.Executable };
+            try { _settings.Save(); NoticeText("Saved", InfoBarSeverity.Success); }
+            catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); }
+        }
+        await CheckCliWelcomeAsync();
+    }
     private async Task SettingsAsync()
     {
         var panel = new StackPanel { Spacing = 20, MaxWidth = 520 };
-        var home = new TextBox { Header = _text["CodexHome"], Text = _settings.CodexHome, FlowDirection = FlowDirection.LeftToRight };
-        var browse = new Button { Content = _text["Browse"] }; browse.Click += async (_, _) => { if (await PickFolderAsync() is { } folder) home.Text = folder; };
-        var exe = new TextBox { Header = _text["CodexExecutable"], Text = _settings.Executable, FlowDirection = FlowDirection.LeftToRight };
+        var settingsOpen = true; var homeRevision = 0;
+        using var home = new HomeDiscoveryPanel(_homeDiscovery, _settings.CodexHome, _text, PickFolderAsync, _lifetime.Token);
+        using var exe = new CliSetupPanel(_settings.Executable, _text, PickExecutableAsync, _lifetime.Token, _resolveExecutable);
         var mode = new ComboBox { Header = _text["Connection"], HorizontalAlignment = HorizontalAlignment.Stretch };
         mode.Items.Add(_text["LocalServer"]); mode.Items.Add(_text["SharedServer"]); mode.SelectedIndex = _settings.UseSharedServer ? 1 : 0;
-        var endpoint = new TextBox { Header = _text["Endpoint"], Text = _settings.Endpoint, PlaceholderText = _text["EndpointHint"], FlowDirection = FlowDirection.LeftToRight, Visibility = _settings.UseSharedServer ? Visibility.Visible : Visibility.Collapsed };
-        mode.SelectionChanged += (_, _) => endpoint.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+        using var discovery = new ServerDiscoveryPanel(_serverDiscovery, () => home.Home, () => exe.Executable, _settings.Endpoint, _text, _lifetime.Token)
+        { Visibility = _settings.UseSharedServer ? Visibility.Visible : Visibility.Collapsed };
+        mode.SelectionChanged += (_, _) =>
+        {
+            discovery.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            if (mode.SelectedIndex == 1) discovery.Activate(); else discovery.Deactivate();
+        };
+        home.HomeChanged += async () =>
+        {
+            var revision = ++homeRevision; discovery.Deactivate();
+            await Task.Delay(400);
+            if (settingsOpen && revision == homeRevision && mode.SelectedIndex == 1) discovery.Activate();
+        };
         var theme = new ComboBox { Header = _text["Theme"], HorizontalAlignment = HorizontalAlignment.Stretch };
         var themes = new[] { "System", "Light", "Dark" }; foreach (var key in themes) theme.Items.Add(_text[key]); theme.SelectedIndex = Math.Max(0, Array.IndexOf(themes, _settings.Theme));
         var language = new ComboBox { Header = _text["Language"], HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -605,22 +661,24 @@ public sealed partial class MainWindow : Window
         foreach (var tag in languages) language.Items.Add(tag.Length == 0 ? _text["System"] : CultureInfo.GetCultureInfo(tag).NativeName);
         language.SelectedIndex = Math.Max(0, Array.IndexOf(languages, _settings.Language));
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed }; error.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
-        foreach (var item in new FrameworkElement[] { home, browse, exe, mode, endpoint, new TextBlock { Text = _text["ConnectionHelp"], TextWrapping = TextWrapping.Wrap }, theme, language, new TextBlock { Text = _text["PrivacyNote"], TextWrapping = TextWrapping.Wrap, FontSize = 12 }, error }) panel.Children.Add(item);
+        foreach (var item in new FrameworkElement[] { mode, discovery, new TextBlock { Text = _text["ConnectionHelp"], TextWrapping = TextWrapping.Wrap }, home, exe, theme, language, new TextBlock { Text = _text["PrivacyNote"], TextWrapping = TextWrapping.Wrap, FontSize = 12 }, error }) panel.Children.Add(item);
         var dialog = new ContentDialog { Title = _text["Settings"], Content = new ScrollViewer { Content = panel, MaxHeight = 530 }, PrimaryButtonText = _text["Save"], CloseButtonText = _text["Cancel"], DefaultButton = ContentDialogButton.Primary };
+        dialog.Opened += (_, _) => { if (mode.SelectedIndex == 1) discovery.Activate(); _ = home.ScanAsync(); _ = exe.CheckAsync(); };
+        dialog.Closing += (_, _) => { settingsOpen = false; discovery.Deactivate(); home.Cancel(); };
         dialog.PrimaryButtonClick += (_, args) =>
         {
-            var errorKey = !Directory.Exists(home.Text) ? "InvalidHome" : mode.SelectedIndex == 1 && !WebSocketTransport.IsAllowedEndpoint(endpoint.Text) ? "InvalidEndpoint" : "";
+            var errorKey = !CodexHomeDiscovery.IsValidPath(home.Home) ? "InvalidHome" : mode.SelectedIndex == 1 && !SharedServerEndpoint.IsAllowed(discovery.Endpoint, home.Home) ? "InvalidServerAddress" : "";
             if (errorKey.Length > 0) { error.Text = _text[errorKey]; error.Visibility = Visibility.Visible; args.Cancel = true; }
         };
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
-        var changedConnection = home.Text != _settings.CodexHome || exe.Text != _settings.Executable || endpoint.Text != _settings.Endpoint || (mode.SelectedIndex == 1) != _settings.UseSharedServer;
-        _settings = _settings with { CodexHome = Path.GetFullPath(home.Text), Executable = exe.Text, UseSharedServer = mode.SelectedIndex == 1, Endpoint = endpoint.Text, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex] };
+        var changedConnection = home.Home != _settings.CodexHome || exe.Executable != _settings.Executable || discovery.Endpoint != _settings.Endpoint || (mode.SelectedIndex == 1) != _settings.UseSharedServer;
+        _settings = _settings with { CodexHome = Path.GetFullPath(home.Home), Executable = exe.Executable, UseSharedServer = mode.SelectedIndex == 1, Endpoint = discovery.Endpoint, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex] };
         try { _settings.Save(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
         _store = new(_settings.CodexHome); _text = new(_settings.Language);
         Localize();
         if (changedConnection && _client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); NoticeText("RestartConnection"); }
         else NoticeText("Saved", InfoBarSeverity.Success);
-        await RefreshAsync(true); UpdateChrome();
+        await RefreshAsync(true); UpdateChrome(); await CheckCliWelcomeAsync();
     }
 }

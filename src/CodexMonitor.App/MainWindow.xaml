@@ -89,6 +89,7 @@
               <FontIcon Glyph="&#xE8A5;" FontSize="36" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" AutomationProperties.AccessibilityView="Raw"/>
               <TextBlock x:Name="WelcomeTitle" Style="{ThemeResource SubtitleTextBlockStyle}" TextAlignment="Center" TextWrapping="Wrap"/>
               <TextBlock x:Name="WelcomeHint" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap"/>
+              <Button x:Name="SetupCodexButton" HorizontalAlignment="Center" Visibility="Collapsed" Click="OnSetupCodex"/>
             </StackPanel>
             <Grid x:Name="Conversation" Visibility="Collapsed">
               <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

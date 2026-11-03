@@ -24,7 +24,8 @@ public sealed partial class MainWindow
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
-        _settings = new AppSettings { Theme = theme, Language = language, ShowTools = false };
+        _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language, ShowTools = false };
+        _cliMissing = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe";
         _text = new(language);
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
         _selected = new SessionInfo { Id = "review-session", Title = "Review the transcript layout and keyboard interactions", Cwd = "D:\\Projects\\CodexMonitor", State = SessionState.Completed, CreatedAt = time, UpdatedAt = time, FileVersion = new(100, time.UtcDateTime) };
@@ -103,11 +104,53 @@ public sealed partial class MainWindow
         UpdateChrome();
     }
     internal void NotifyReviewSession(RpcMessage message) => UpdateSessionActivity(message);
+    internal async Task<(ContentDialog Dialog, ServerDiscoveryPanel Panel, Task Closing)> OpenServerDiscoveryReviewAsync(IServerDiscovery discovery)
+    {
+        _serverDiscovery = discovery;
+        _settings = _settings with { UseSharedServer = true };
+        var closing = SettingsAsync(); await SettleAsync();
+        var dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child).OfType<ContentDialog>().FirstOrDefault()
+            ?? VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => FindVisual<ContentDialog>(p.Child)).FirstOrDefault(d => d is not null)
+            ?? throw new InvalidOperationException("Settings dialog did not open");
+        var panel = FindVisual<ServerDiscoveryPanel>(dialog) ?? throw new InvalidOperationException("Server discovery panel did not appear");
+        return (dialog, panel, closing);
+    }
     private sealed class ReviewTransport : IRpcTransport
     {
         public Task SendAsync(string message, CancellationToken ct) => Task.CompletedTask;
         public async Task<string?> ReceiveAsync(CancellationToken ct) { await Task.Delay(Timeout.Infinite, ct); return null; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+    private sealed class ReviewHomeDiscovery : ICodexHomeDiscovery
+    {
+        public Task<IReadOnlyList<string>> FindAsync(string home, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>([home]);
+    }
+
+    internal async Task<(ContentDialog Dialog, HomeDiscoveryPanel Home, CliSetupPanel Cli, Task Closing)> OpenSetupReviewAsync(ICodexHomeDiscovery homes, Func<string, string> resolve, string home)
+    {
+        _homeDiscovery = homes; _resolveExecutable = resolve;
+        _settings = _settings with { UseSharedServer = false, CodexHome = home };
+        var closing = SettingsAsync(); await SettleAsync();
+        var dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child).OfType<ContentDialog>().FirstOrDefault()
+            ?? VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => FindVisual<ContentDialog>(p.Child)).First(d => d is not null)!;
+        return (dialog, FindVisual<HomeDiscoveryPanel>(dialog)!, FindVisual<CliSetupPanel>(dialog)!, closing);
+    }
+    internal async Task<(ContentDialog Dialog, Task Closing)> OpenMissingCliReviewAsync()
+    {
+        _settings = _settings with { UseSharedServer = false };
+        _resolveExecutable = _ => throw new FileNotFoundException();
+        var closing = ConnectAsync(); await SettleAsync();
+        var dialog = VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child).OfType<ContentDialog>().FirstOrDefault()
+            ?? VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => FindVisual<ContentDialog>(p.Child)).First(d => d is not null)!;
+        return (dialog, closing);
+    }
+    internal async Task<bool> SetMissingCliWelcomeReviewAsync(bool missing)
+    {
+        _settings = _settings with { UseSharedServer = false };
+        _resolveExecutable = missing ? _ => throw new FileNotFoundException() : _ => "C:\\codex.exe";
+        WelcomePanel.Visibility = Visibility.Visible; Conversation.Visibility = Visibility.Collapsed;
+        await CheckCliWelcomeAsync(); await SettleAsync();
+        return SetupCodexButton.Visibility == Visibility.Visible;
     }
 
     internal async Task<string> CaptureSettingsReviewAsync()
