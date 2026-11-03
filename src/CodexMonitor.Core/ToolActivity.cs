@@ -4,9 +4,10 @@ using System.Text.RegularExpressions;
 
 namespace CodexMonitor.Core;
 
-public enum ToolActivityState { Unknown, Running, Completed, Failed }
+public enum ToolActivityState { Unknown, Running, Completed, Failed, Interrupted }
 public sealed record ToolActivity(string Name, string Input, string? Output = null, ToolActivityState State = ToolActivityState.Running,
-    long? DurationMs = null, string? SummaryOverride = null, string? CategoryOverride = null, int? AddedLines = null, int? RemovedLines = null)
+    long? DurationMs = null, string? SummaryOverride = null, string? CategoryOverride = null, int? AddedLines = null, int? RemovedLines = null,
+    string? Progress = null, string? StandardInput = null)
 {
     public long? WaitDurationMs
     {
@@ -34,18 +35,18 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             return value;
         }
     }
-    public string CategoryKey => CategoryOverride ?? InferCategory();
+    public string CategoryKey => WaitDurationMs is not null ? "ToolWaiting" : CategoryOverride ?? InferCategory();
     private string InferCategory()
     {
         if (WaitDurationMs is not null) return "ToolWaiting";
         if (Input.Contains("*** Begin Patch", StringComparison.Ordinal) || Name is "apply_patch" or "fileChange") return "ToolFileChanges";
         var name = Name.Split([".", "/", ":"], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? Name;
-        if (name == "write_stdin" || Input.Contains("write_stdin", StringComparison.Ordinal)) return "ToolReadOutput";
+        if (name == "write_stdin" || Input.Contains("write_stdin", StringComparison.Ordinal) || name == "wait" && (Input.Contains("cell_id", StringComparison.Ordinal) || Input.Contains("yield_time_ms", StringComparison.Ordinal))) return "ToolReadOutput";
         if (name is "view_image" or "imageView") return "ToolImageView";
         if (name is "imagegen" or "imageGeneration" or "image_generation") return "ToolImageGeneration";
         if (name is "read_file" or "readFile") return "ToolReadFile";
         if (name is "list_dir" or "listFiles" or "list_directory") return "ToolListFiles";
-        if (name is "spawn_agent" or "send_message" or "wait_agent" or "followup_task" or "collabToolCall") return "ToolCollaboration";
+        if (name is "spawn_agent" or "send_message" or "wait_agent" or "followup_task" or "interrupt_agent" or "list_agents" or "collabToolCall" or "collabAgentToolCall") return "ToolCollaboration";
         if (name is "update_plan" or "plan") return "ToolPlan";
         if (Name.StartsWith("mcp__", StringComparison.OrdinalIgnoreCase)) return "ToolMcp";
         if (name.Contains("search", StringComparison.OrdinalIgnoreCase) || Input.Contains("\"search_query\"", StringComparison.Ordinal)) return "ToolSearch";
@@ -109,27 +110,51 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
     public static ToolActivity FromItem(JsonElement item)
     {
         var type = item.Str("type");
-        var state = item.Str("status") switch { "inProgress" => ToolActivityState.Running, "failed" or "declined" => ToolActivityState.Failed, "completed" => ToolActivityState.Completed, _ => ToolActivityState.Unknown };
-        if (item.Field("exitCode").TryNumber(out var exit) && exit != 0 || item.Field("success").ValueKind == JsonValueKind.False || item.Field("error").ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)) state = ToolActivityState.Failed;
+        var state = item.Str("status") switch { "inProgress" or "in_progress" or "running" => ToolActivityState.Running, "failed" or "declined" => ToolActivityState.Failed, "completed" => ToolActivityState.Completed, "interrupted" => ToolActivityState.Interrupted, _ => ToolActivityState.Unknown };
+        if (item.Field("exitCode").TryNumber(out var exit) && exit != 0 || item.Field("success").ValueKind == JsonValueKind.False || item.Field("result").Field("isError").ValueKind == JsonValueKind.True || item.Field("error").ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null) || item.Field("failure").ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)) state = ToolActivityState.Failed;
         long? duration = item.Field("durationMs").TryNumber(out var milliseconds) && milliseconds >= 0 ? milliseconds : null;
         return type switch
         {
             "commandExecution" => Command(item, state, duration),
+            "sleep" => FromCall("clock.sleep", new JsonObject { ["durationMs"] = JsonNode.Parse(item.Field("durationMs").TextValue() is { Length: > 0 } value ? value : "null") }.ToJsonString(), state: state),
             "fileChange" => new(type, item.Field("changes").TextValue(), State: state, DurationMs: duration,
                 SummaryOverride: string.Join(", ", item.Field("changes").Items().Select(c => Path.GetFileName(c.Str("path").Replace('/', Path.DirectorySeparatorChar)))), CategoryOverride: "ToolFileChanges"),
             "webSearch" or "web_search_call" => Web(item, state, duration),
-            "mcpToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration,
-                string.Join(" · ", new[] { item.Str("server"), item.Str("tool") }.Where(s => s.Length > 0)), "ToolMcp"),
-            "dynamicToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("contentItems").TextValue(), state, duration, item.Str("tool"), "ToolDynamic"),
-            "collabToolCall" => new(type, new JsonObject { ["tool"] = item.Str("tool"), ["receiverThreadId"] = item.Str("receiverThreadId", item.Str("newThreadId")), ["prompt"] = item.Str("prompt") }.ToJsonString(), item.Field("agentStatus").TextValue(), state, duration, item.Str("tool") + " " + item.Str("receiverThreadId", item.Str("newThreadId")), "ToolCollaboration"),
+            "mcpToolCall" => FromCall(Qualify(item.Str("server"), item.Str("tool", type)), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration, "ToolMcp", string.Join(" · ", new[] { item.Field("appContext").Str("appName", item.Str("server")), item.Field("appContext").Str("actionName", item.Str("tool")) }.Where(s => s.Length > 0))),
+            "dynamicToolCall" => FromCall(Qualify(item.Str("namespace"), item.Str("tool", type)), item.Field("arguments").TextValue(), item.Field("contentItems").TextValue(), state, duration, "ToolDynamic"),
+            "collabToolCall" or "collabAgentToolCall" => Collaboration(item, state, duration),
+            "subAgentActivity" => new(type, SelectFields(item, "agentThreadId", "agentPath", "model", "reasoningEffort"), State: item.Str("kind") switch { "started" => ToolActivityState.Running, "completed" => ToolActivityState.Completed, "interrupted" => ToolActivityState.Interrupted, _ => state }, SummaryOverride: item.Str("agentPath", item.Str("agentThreadId")), CategoryOverride: item.Str("kind") switch { "started" => "AgentStarted", "completed" => "AgentCompleted", "interrupted" => "AgentInterrupted", _ => "AgentInteracted" }),
+            "hookPrompt" => new(type, string.Join("\n\n", item.Field("fragments").Items().Select(p => p.Str("text"))), State: state, CategoryOverride: "EventHook", SummaryOverride: ""),
             "imageView" => new(type, item.Str("path"), State: state, DurationMs: duration, SummaryOverride: Path.GetFileName(item.Str("path").Replace('/', Path.DirectorySeparatorChar)), CategoryOverride: "ToolImageView"),
-            "imageGeneration" or "image_generation_call" => new(type, item.GetRawText(), State: state, DurationMs: duration, SummaryOverride: item.Str("revised_prompt", item.Str("prompt")), CategoryOverride: "ToolImageGeneration"),
-            "plan" => new(type, item.Str("text"), State: state, SummaryOverride: item.Str("text"), CategoryOverride: "ToolPlan"),
+            "imageGeneration" or "image_generation_call" => new(type, SelectFields(item, "revisedPrompt", "revised_prompt", "prompt", "savedPath", "inputImages", "transparentBackground"), item.Field("failure").TextValue(), state, duration, item.Str("revisedPrompt", item.Str("revised_prompt", item.Str("prompt"))), "ToolImageGeneration"),
+            "plan" => new(type, item.Field("plan").ValueKind == JsonValueKind.Array ? item.GetRawText() : item.Str("text"), State: state, SummaryOverride: item.Str("text"), CategoryOverride: "ToolPlan"),
             "contextCompaction" => new(type, "", State: state, SummaryOverride: "", CategoryOverride: "ToolCompaction"),
             "enteredReviewMode" or "exitedReviewMode" => new(type, item.Str("review"), State: state, SummaryOverride: item.Str("review"), CategoryOverride: "ToolReview"),
             "functionCallOutput" => new(item.Str("name", type), "", item.Field("output").TextValue(), state, duration, item.Str("namespace") + " " + item.Str("name"), "ToolReadOutput"),
             _ => new(type, item.GetRawText(), State: state, DurationMs: duration)
         };
+    }
+    public static ToolActivity FromCall(string name, string input, string? output = null, ToolActivityState state = ToolActivityState.Running,
+        long? durationMs = null, string? transportCategory = null, string? transportSummary = null)
+    {
+        var call = new ToolActivity(name, input, output, state, durationMs);
+        var semantic = call.InferCategory();
+        var category = transportCategory == "ToolMcp" && semantic != "ToolWaiting" ? "ToolMcp" : semantic == "ToolDetails" ? transportCategory : semantic;
+        return call with { CategoryOverride = category, SummaryOverride = category is "ToolMcp" or "ToolDynamic" ? transportSummary ?? name : null };
+    }
+    private static string Qualify(string scope, string name) => scope.Length == 0 || name.StartsWith(scope + ".", StringComparison.Ordinal) ? name : scope + "." + name;
+    private static string SelectFields(JsonElement item, params string[] names)
+    {
+        var values = new JsonObject();
+        foreach (var name in names) if (item.Field(name).ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)) values[name] = JsonNode.Parse(item.Field(name).GetRawText());
+        return values.Count == 0 ? "" : values.ToJsonString();
+    }
+    private static ToolActivity Collaboration(JsonElement item, ToolActivityState state, long? duration)
+    {
+        var receiver = item.Str("receiverThreadId", item.Str("newThreadId"));
+        if (receiver.Length == 0) receiver = string.Join(", ", item.Field("receiverThreadIds").Items().Select(x => x.TextValue()));
+        return new(item.Str("type"), SelectFields(item, "tool", "receiverThreadId", "newThreadId", "receiverThreadIds", "senderThreadId", "prompt", "model", "reasoningEffort"),
+            item.Field("agentsStates").ValueKind == JsonValueKind.Undefined ? item.Field("agentStatus").TextValue() : item.Field("agentsStates").TextValue(), state, duration, item.Str("tool") + " " + receiver, "ToolCollaboration");
     }
     private static ToolActivity Web(JsonElement item, ToolActivityState state, long? duration)
     {

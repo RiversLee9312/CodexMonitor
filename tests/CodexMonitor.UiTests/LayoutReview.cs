@@ -20,6 +20,7 @@ public sealed partial class MainWindow
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
         InvalidateTranscriptRead(); SetLatestVisible(false);
+        _serverEvents.Clear();
         _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
         foreach (var item in _reviewFontOverrides) item.Element.SetValue(item.Property, item.Value);
         _reviewFontOverrides.Clear();
@@ -139,6 +140,17 @@ public sealed partial class MainWindow
         _expandedActivities.Add(activity.Id); _expandedActivities.Add(activity.Id + ":edit:0"); RenderMessages(true); await SettleAsync();
     }
     internal IReadOnlyList<T> ReviewVisualElements<T>() where T : DependencyObject => Descendants(Root).OfType<T>().ToArray();
+    internal async Task ShowProtocolEntryReviewAsync(TranscriptEntry entry, bool expand = true, bool live = false)
+    {
+        if (live) { await ConnectReviewServerAsync(); _selected = _selected! with { IsLive = true, State = SessionState.Active }; }
+        _snapshot = new(_selected!, new[] { entry }); _expandedActivities.Clear(); if (expand) _expandedActivities.Add(entry.Id);
+        _following = false; RenderMessages(true); await SettleAsync();
+    }
+    internal async Task<(ContentDialog Dialog, Task Closing)> OpenProtocolDetailsReviewAsync()
+    {
+        var closing = DetailsAsync(); await SettleAsync();
+        return (VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child as ContentDialog ?? FindVisual<ContentDialog>(p.Child)).First(d => d is not null)!, closing);
+    }
     private readonly List<(DependencyObject Element, DependencyProperty Property, object Value)> _reviewFontOverrides = [];
     internal async Task ScaleReviewTextAsync(double factor)
     {

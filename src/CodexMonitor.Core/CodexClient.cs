@@ -12,7 +12,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.5" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.6" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new JsonObject(), ct).ConfigureAwait(false);
     }
@@ -100,7 +100,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
             var result = response.Value;
             foreach (var turn in result.Field("data").Items())
                 foreach (var item in turn.Field("items").Items())
-                { var entry = ParseItem(item, turn.Date("createdAt")); entries.Add(entry); watermarks[entry.Id] = response.Sequence; }
+                { var entry = ParseItem(item, turn.Date("createdAt"), turn.Str("status") == "completed" ? ToolActivityState.Completed : null); entries.Add(entry); watermarks[entry.Id] = response.Sequence; }
             cursor = result.Str("nextCursor");
             if (cursor.Length > 0 && !seen.Add(cursor)) throw new IOException("Repeated pagination cursor");
         } while (!string.IsNullOrEmpty(cursor));
@@ -108,26 +108,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     }
 
     public static TranscriptEntry ParseItem(JsonElement item, DateTimeOffset timestamp = default, ToolActivityState? lifecycle = null)
-    {
-        var type = item.Str("type");
-        if (type == "reasoning")
-        {
-            var reasoning = ReasoningContent.Parse(item);
-            return new(item.Str("id", Guid.NewGuid().ToString()), EntryKind.Reasoning, reasoning.DisplayText, timestamp, type, Reasoning: reasoning);
-        }
-        var kind = type switch { "userMessage" => EntryKind.User, "agentMessage" => EntryKind.Assistant, "reasoning" => EntryKind.Reasoning,
-            "commandExecution" or "fileChange" or "mcpToolCall" or "dynamicToolCall" or "webSearch" or "collabToolCall" or "imageView" or "imageGeneration" or "functionCallOutput" => EntryKind.Tool, _ => EntryKind.Event };
-        var text = type switch
-        {
-            "userMessage" => string.Join("\n", item.Field("content").Items().Select(x => x.Str("text", x.Str("type")))),
-            "agentMessage" or "plan" => item.Str("text"),
-            "commandExecution" => item.Str("command") + "\n" + item.Str("aggregatedOutput"),
-            _ => item.GetRawText()
-        };
-        var tool = kind == EntryKind.Tool || type is "plan" or "contextCompaction" or "enteredReviewMode" or "exitedReviewMode" ? ToolActivity.FromItem(item) : null;
-        if (tool is { State: ToolActivityState.Unknown } && lifecycle is { } state) tool = tool with { State = state };
-        return new(item.Str("id", Guid.NewGuid().ToString()), kind, text, timestamp, type, Tool: tool);
-    }
+        => TranscriptItemAdapter.Parse(item, timestamp, lifecycle);
     public static SessionState ParseState(JsonElement status) => status.Str("type") switch
         {
             "active" when status.Field("activeFlags").Items().Any(x => x.TextValue() == "waitingOnApproval") => SessionState.Waiting,

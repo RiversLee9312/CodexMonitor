@@ -9,7 +9,7 @@ internal static class ActivityIcon
 {
     internal static readonly IReadOnlyDictionary<string, string> Generated = new Dictionary<string, string>
     {
-        ["Thinking"] = "Thinking", ["ToolMcp"] = "McpTool", ["EventMcpStatus"] = "McpTool", ["ToolDynamic"] = "CustomTool", ["ToolCollaboration"] = "AgentCollaboration",
+        ["Thinking"] = "Thinking", ["ToolMcp"] = "McpTool", ["EventMcpStatus"] = "McpTool", ["ToolDynamic"] = "CustomTool", ["ToolCollaboration"] = "AgentCollaboration", ["AgentMessage"] = "AgentCollaboration", ["AgentStarted"] = "AgentCollaboration", ["AgentInteracted"] = "AgentCollaboration", ["AgentInterrupted"] = "AgentCollaboration", ["AgentCompleted"] = "AgentCollaboration",
         ["ToolCompaction"] = "ContextCompaction", ["EventHook"] = "LifecycleHook", ["ToolImageGeneration"] = "ImageGeneration",
         ["ToolFindInPage"] = "FindInPage", ["EventUsage"] = "TokenUsage", ["EventLimits"] = "TokenUsage"
     };
@@ -21,9 +21,9 @@ internal static class ActivityIcon
         {
             "ToolFileChanges" => "\uE70F", "ToolSearch" => "\uE721", "ToolCommand" or "ToolReadOutput" => "\uE756",
             "ToolReadFile" => "\uE8A5", "ToolListFiles" => "\uE8B7", "ToolOpenPage" => "\uE774", "ToolImageView" => "\uEB9F",
-            "ToolPlan" => "\uE9D5", "ToolReview" => "\uE73E", "ToolWaiting" or "EventBuffering" => "\uE917",
+            "ToolPlan" => "\uE9D5", "ToolReview" or "EventAutoApprovalReview" => "\uE73E", "ToolWaiting" or "EventBuffering" => "\uE917", "Settings" => "\uE713", "EventAuthRecovery" => "\uE72C",
             "EventModelChanged" => "\uE8AB", "EventWarning" or "EventVerification" => "\uE7BA", "EventError" => "\uE783",
-            "EventRetrying" => "\uE72C", "EventInterrupted" => "\uE71A", _ => "\uE8A5"
+            "EventRetrying" or "EventConnection" => "\uE72C", "EventConfiguration" => "\uE713", "EventSession" or "EventRealtime" => "\uE946", "EventInterrupted" => "\uE71A", _ => "\uE8A5"
         } };
         icon.Width = icon.Height = 16; icon.VerticalAlignment = VerticalAlignment.Center;
         icon.SetResourceReference(IconElement.ForegroundProperty, state == ToolActivityState.Failed ? "SystemFillColorCriticalBrush" :

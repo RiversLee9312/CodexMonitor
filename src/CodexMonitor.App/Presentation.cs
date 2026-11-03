@@ -83,7 +83,7 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
     public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
         (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
-        { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
+        { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
         Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Update(EntryRow next)
@@ -350,7 +350,9 @@ public sealed partial class TranscriptCard : UserControl
                 ("ToolSearch", ToolActivityState.Completed) => "ToolSearched", ("ToolSearch", _) => "ToolSearching", _ => tool.CategoryKey
             }];
         if (tool?.State == ToolActivityState.Failed && tool.CategoryKey != "EventError") label = row.Text["ToolFailed"] + " · " + label;
+        if (tool?.State == ToolActivityState.Interrupted && tool.CategoryKey != "AgentInterrupted") label = row.Text["EventInterrupted"] + " · " + label;
         var summary = tool?.Summary ?? "";
+        if (summary.Length > 0 && tool?.CategoryKey is "AgentMessage" or "ToolCollaboration") summary = "\u2066" + summary + "\u2069";
         var title = label + (summary.Length > 0 ? " " + summary : "");
         if (tool is { AddedLines: { } added, RemovedLines: { } removed }) title += " +" + row.Text.Number(added) + " −" + row.Text.Number(removed);
         return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, tool?.CategoryKey), row, () =>
@@ -377,6 +379,7 @@ public sealed partial class TranscriptCard : UserControl
         var completed = tool.State == ToolActivityState.Completed;
         var title = completed ? text["ToolWaitCompleted"] + " · " + duration : waiting ? text["ToolWaiting"] + " · " + duration : text.Format("ToolWaitDuration", duration);
         if (tool.State == ToolActivityState.Failed) title = text["ToolFailed"] + " · " + title;
+        if (tool.State == ToolActivityState.Interrupted) title = text["EventInterrupted"] + " · " + title;
         var header = (Grid)ActivityHeader(title, waiting ? ToolActivityState.Running : tool.State == ToolActivityState.Running ? ToolActivityState.Unknown : tool.State, text, categoryKey: "ToolWaiting");
         if (waiting)
         {
@@ -424,7 +427,7 @@ public sealed partial class TranscriptCard : UserControl
         AutomationProperties.SetName(toggle, name); AutomationProperties.SetAutomationId(toggle, "ActivityToggle-" + id);
         AutomationProperties.SetHelpText(toggle, row.Text["ActivityDetailsHelp"]);
         if (row.Entry.Tool is { } activity && (activity.State != ToolActivityState.Running || row.IsLive))
-            AutomationProperties.SetItemStatus(toggle, row.Text[activity.State switch { ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Failed => "ToolFailed", ToolActivityState.Running => "ToolRunning", _ => "Tool" }]);
+            AutomationProperties.SetItemStatus(toggle, row.Text[activity.State switch { ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Running => "ToolRunning", _ => "Tool" }]);
         var content = new Border { Padding = new Thickness(12), Margin = new Thickness(0, 4, 0, 8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Visibility = Visibility.Collapsed };
         content.SetResourceReference(Border.BackgroundProperty, "ControlFillColorTertiaryBrush"); content.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
         Grid.SetRow(content, 1); grid.Children.Add(toggle); grid.Children.Add(content);

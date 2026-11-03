@@ -8,10 +8,20 @@ var handle = new IntPtr(long.Parse(args[1], System.Globalization.CultureInfo.Inv
 var output = Path.GetFullPath(args[2]); Directory.CreateDirectory(output);
 var config = Config.Builder.ForProcessId(processId).WithOutputFileFormat(OutputFileFormat.A11yTest).WithAlwaysSaveTestFile().WithOutputDirectory(output).Build();
 var scanner = ScannerFactory.CreateScanner(config);
-var result = scanner.Scan(new ScanOptions(scanId: args[3], scanRootWindowHandle: handle));
+ScanOutput result;
+string? screenshotUnavailable = null;
+try { result = scanner.Scan(new ScanOptions(scanId: args[3], scanRootWindowHandle: handle)); }
+catch (System.ComponentModel.Win32Exception error) when (error.NativeErrorCode == 6 && error.StackTrace?.Contains("CopyFromScreen", StringComparison.Ordinal) == true)
+{
+    // A disconnected desktop can expose UIA while its GDI screen DC is unavailable. Re-run the
+    // complete rules without the optional screenshot/export; the UI tests attach a XAML render.
+    screenshotUnavailable = "GDI CopyFromScreen returned invalid handle (6)";
+    scanner = ScannerFactory.CreateScanner(Config.Builder.ForProcessId(processId).WithOutputFileFormat(OutputFileFormat.None).Build());
+    result = scanner.Scan(new ScanOptions(scanId: args[3], scanRootWindowHandle: handle));
+}
 var report = result.WindowScanOutputs.Select(window => new
 {
-    window.ErrorCount, File = window.OutputFile.A11yTest,
+    window.ErrorCount, File = window.OutputFile.A11yTest, ScreenshotUnavailable = screenshotUnavailable,
     Errors = window.Errors.Select(error => new { Rule = error.Rule.ID.ToString(), error.Rule.Description, error.Rule.HowToFix, error.Element.Properties }).ToArray()
 }).ToArray();
 await File.WriteAllTextAsync(Path.Combine(output, args[3] + ".json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));

@@ -29,7 +29,7 @@ dotnet run --project .\src\CodexMonitor.App -p:Platform=x64
 .\scripts\Build-Installer.ps1
 ```
 
-输出为 `artifacts\installer\CodexMonitor-0.1.5-win-x64.msi`，附带 SHA-256 校验文件。MSI 按当前用户安装到 `%LOCALAPPDATA%\Programs\CodexMonitor`，提供开始菜单入口和 Windows“已安装的应用”卸载项。使用时无需安装 .NET 或开发 SDK。构建脚本会在项目的临时工具目录安装固定版本 WiX 4.0.6。体积优化与验证见 [发布体积记录](docs/deployment-size.md)。
+输出为 `artifacts\installer\CodexMonitor-0.1.6-win-x64.msi`，附带 SHA-256 校验文件。MSI 按当前用户安装到 `%LOCALAPPDATA%\Programs\CodexMonitor`，提供开始菜单入口和 Windows“已安装的应用”卸载项。使用时无需安装 .NET 或开发 SDK。构建脚本会在项目的临时工具目录安装固定版本 WiX 4.0.6。体积优化与验证见 [发布体积记录](docs/deployment-size.md)。
 
 ## 查看会话
 
@@ -73,6 +73,8 @@ CLI 可以连接共享后台服务器或使用 `--remote`；不能只凭 transcr
 ## 界面与语言
 
 推理摘要和连续工具调用在同一活动区内按原顺序显示。按协议的 `summary` 与 `content` 字段区分摘要和明文思考：摘要完整显示，明文思考默认折叠；缺少类型标记的旧提供商内容也默认折叠，不用文字风格猜测摘要。加密推理始终不读取、不展示、不导出。工具与事件默认折叠为一行。修改文件显示文件名和增删行数，命令显示可读摘要，已提供的耗时单独显示；完整参数、输出、差异在展开层查看并分别复制。一个补丁涉及多个文件时分行展示，导出仍保留原始调用。展开状态在实时更新时保留，长活动列表保持虚拟化。
+
+本地文件与 app-server 共用条目适配器，覆盖原生 sleep、MCP/动态工具、协作与子代理、SDK/旧版记录。MCP 进度、补丁增量与终端输入按同一活动更新；服务级通知可在详情的“服务器状态”查看。完整类型清单和边界见 [协议覆盖](docs/protocol-coverage.md)，可运行 `scripts/Audit-Protocol.ps1` 与已安装 CLI 的 schema 比较。
 
 `sleep` / `wait` 工具的时长参数识别为等待活动，显示设定时长、时钟及完成状态；只有服务器确认活动时才显示等待动画。历史记录不计时，也不凭设定时长伪造完成进度。原始参数和输出可在“详情”查看。
 

@@ -1,0 +1,902 @@
+{
+  "cliVersion": "0.164.0",
+  "checked": "2026-11-04",
+  "notifications": [
+    {
+      "method": "error",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "error",
+        "threadId",
+        "turnId",
+        "willRetry"
+      ]
+    },
+    {
+      "method": "thread/started",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "thread"
+      ]
+    },
+    {
+      "method": "thread/status/changed",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "status",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/readState/changed",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "readState",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/archived",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/deleted",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/unarchived",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/closed",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/reverted",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "skills/changed",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": []
+    },
+    {
+      "method": "thread/name/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId",
+        "threadName"
+      ]
+    },
+    {
+      "method": "thread/attachment/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "attachmentId",
+        "attachmentType",
+        "identityKey",
+        "operation",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/goal/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "goal",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "thread/prediction/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "result",
+        "sourceTurnId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/goal/cleared",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/queue/changed",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId"
+      ]
+    },
+    {
+      "method": "project/changed",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "changeType",
+        "projectId"
+      ]
+    },
+    {
+      "method": "thread/project/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "projectId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/environment/connected",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "environmentId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/environment/disconnected",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "environmentId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/settings/updated",
+      "route": "Session",
+      "category": "EventSession",
+      "fields": [
+        "threadId",
+        "threadSettings"
+      ]
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "route": "Activity",
+      "category": "EventSession",
+      "fields": [
+        "threadId",
+        "tokenUsage",
+        "turnId"
+      ]
+    },
+    {
+      "method": "turn/started",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "threadId",
+        "turn"
+      ]
+    },
+    {
+      "method": "hook/started",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "run",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "turn/completed",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "threadId",
+        "turn"
+      ]
+    },
+    {
+      "method": "hook/completed",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "run",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "turn/diff/updated",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "diff",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "turn/plan/updated",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "explanation",
+        "plan",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/started",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "item",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/autoApprovalReview/started",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "action",
+        "review",
+        "reviewId",
+        "startedAtMs",
+        "targetItemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/autoApprovalReview/completed",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "action",
+        "completedAtMs",
+        "decisionSource",
+        "review",
+        "reviewId",
+        "startedAtMs",
+        "targetItemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "autoApprovalReview/strictReviewRequired",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/completed",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "completedAtMs",
+        "item",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/plan/delta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "command/exec/outputDelta",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "capReached",
+        "deltaBase64",
+        "processId",
+        "stream"
+      ]
+    },
+    {
+      "method": "process/outputDelta",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "capReached",
+        "deltaBase64",
+        "processHandle",
+        "stream"
+      ]
+    },
+    {
+      "method": "process/exited",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "exitCode",
+        "processHandle",
+        "stderr",
+        "stderrCapReached",
+        "stdout",
+        "stdoutCapReached"
+      ]
+    },
+    {
+      "method": "item/commandExecution/outputDelta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/commandExecution/terminalInteraction",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "itemId",
+        "processId",
+        "stdin",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/fileChange/outputDelta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/fileChange/patchUpdated",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "changes",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "serverRequest/resolved",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "requestId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "item/mcpToolCall/progress",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "itemId",
+        "message",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "mcpServer/oauthLogin/completed",
+      "route": "Activity",
+      "category": "EventConnection",
+      "fields": [
+        "error",
+        "loginId",
+        "name",
+        "success",
+        "threadId"
+      ]
+    },
+    {
+      "method": "mcpServer/startupStatus/updated",
+      "route": "Activity",
+      "category": "EventConnection",
+      "fields": [
+        "error",
+        "failureReason",
+        "name",
+        "status",
+        "threadId"
+      ]
+    },
+    {
+      "method": "mcpServer/event/stream/notification",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "notification",
+        "subscriptionId"
+      ]
+    },
+    {
+      "method": "account/updated",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "authMode",
+        "planType"
+      ]
+    },
+    {
+      "method": "account/gatewayOAuth/changed",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "authUrl",
+        "error",
+        "providerId",
+        "status"
+      ]
+    },
+    {
+      "method": "account/rateLimits/updated",
+      "route": "Activity",
+      "category": "EventConnection",
+      "fields": [
+        "rateLimits"
+      ]
+    },
+    {
+      "method": "app/list/updated",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "data"
+      ]
+    },
+    {
+      "method": "remoteControl/status/changed",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "environmentId",
+        "installationId",
+        "serverName",
+        "status"
+      ]
+    },
+    {
+      "method": "externalAgentConfig/import/progress",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "importId",
+        "itemTypeResults"
+      ]
+    },
+    {
+      "method": "externalAgentConfig/import/completed",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "importId",
+        "itemTypeResults"
+      ]
+    },
+    {
+      "method": "fs/changed",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "changedPaths",
+        "watchId"
+      ]
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "delta",
+        "itemId",
+        "summaryIndex",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "itemId",
+        "summaryIndex",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "item/reasoning/textDelta",
+      "route": "Stream",
+      "category": "EventConfiguration",
+      "fields": [
+        "contentIndex",
+        "delta",
+        "itemId",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "thread/compacted",
+      "route": "Activity",
+      "category": "EventSession",
+      "fields": [
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "model/rerouted",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "fromModel",
+        "reason",
+        "threadId",
+        "toModel",
+        "turnId"
+      ]
+    },
+    {
+      "method": "model/verification",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "threadId",
+        "turnId",
+        "verifications"
+      ]
+    },
+    {
+      "method": "modelProvider/authRecoveryStarted",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "message",
+        "provider",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "modelProvider/authRecoveryCompleted",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "message",
+        "provider",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "turn/moderationMetadata",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "metadata",
+        "threadId",
+        "turnId"
+      ]
+    },
+    {
+      "method": "model/safetyBuffering/updated",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "fasterModel",
+        "model",
+        "reasons",
+        "showBufferingUi",
+        "threadId",
+        "turnId",
+        "useCases"
+      ]
+    },
+    {
+      "method": "warning",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "message",
+        "threadId"
+      ]
+    },
+    {
+      "method": "guardianWarning",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "message",
+        "threadId"
+      ]
+    },
+    {
+      "method": "deprecationNotice",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "details",
+        "summary"
+      ]
+    },
+    {
+      "method": "configWarning",
+      "route": "Activity",
+      "category": "EventConfiguration",
+      "fields": [
+        "details",
+        "path",
+        "range",
+        "summary"
+      ]
+    },
+    {
+      "method": "fuzzyFileSearch/sessionUpdated",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "files",
+        "query",
+        "sessionId"
+      ]
+    },
+    {
+      "method": "fuzzyFileSearch/sessionCompleted",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "sessionId"
+      ]
+    },
+    {
+      "method": "thread/realtime/started",
+      "route": "Activity",
+      "category": "EventRealtime",
+      "fields": [
+        "realtimeSessionId",
+        "threadId",
+        "version"
+      ]
+    },
+    {
+      "method": "thread/realtime/itemAdded",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "item",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/item/started",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "item",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/item/transcript/delta",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "delta",
+        "itemId",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/item/completed",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "item",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/transcript/delta",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "delta",
+        "role",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/transcript/done",
+      "route": "Stream",
+      "category": "EventRealtime",
+      "fields": [
+        "role",
+        "text",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/outputAudio/delta",
+      "route": "Server",
+      "category": "EventRealtime",
+      "fields": [
+        "audio",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/sdp",
+      "route": "Activity",
+      "category": "EventRealtime",
+      "fields": [
+        "sdp",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/error",
+      "route": "Activity",
+      "category": "EventRealtime",
+      "fields": [
+        "message",
+        "threadId"
+      ]
+    },
+    {
+      "method": "thread/realtime/closed",
+      "route": "Activity",
+      "category": "EventRealtime",
+      "fields": [
+        "reason",
+        "threadId"
+      ]
+    },
+    {
+      "method": "windows/worldWritableWarning",
+      "route": "Server",
+      "category": "EventConfiguration",
+      "fields": [
+        "extraCount",
+        "failedScan",
+        "samplePaths"
+      ]
+    },
+    {
+      "method": "windowsSandbox/setupCompleted",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "error",
+        "mode",
+        "success"
+      ]
+    },
+    {
+      "method": "account/login/completed",
+      "route": "Server",
+      "category": "EventConnection",
+      "fields": [
+        "error",
+        "loginId",
+        "onboardingEntrypoint",
+        "success"
+      ]
+    }
+  ],
+  "threadItemTypes": [
+    "userMessage",
+    "hookPrompt",
+    "agentMessage",
+    "functionCallOutput",
+    "plan",
+    "reasoning",
+    "commandExecution",
+    "fileChange",
+    "mcpToolCall",
+    "dynamicToolCall",
+    "collabAgentToolCall",
+    "subAgentActivity",
+    "webSearch",
+    "imageView",
+    "sleep",
+    "imageGeneration",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "contextCompaction"
+  ],
+  "responseItemTypes": [
+    "additional_tools",
+    "message",
+    "agent_message",
+    "reasoning",
+    "local_shell_call",
+    "function_call",
+    "tool_search_call",
+    "function_call_output",
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "tool_search_output",
+    "web_search_call",
+    "image_generation_call",
+    "compaction",
+    "configuration_update",
+    "compaction_trigger",
+    "context_compaction",
+    "other"
+  ],
+  "additionalCompatibilityTypes": [
+    "collabToolCall",
+    "multi_agent_call",
+    "multi_agent_call_output",
+    "SDK snake_case items",
+    "PascalCase persisted completed items",
+    "codex/event legacy envelopes"
+  ]
+}

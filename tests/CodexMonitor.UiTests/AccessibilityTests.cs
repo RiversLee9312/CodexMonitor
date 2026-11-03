@@ -18,42 +18,67 @@ public sealed class AccessibilityTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
-    [DataRow("Light", "zh-CN", false)]
-    [DataRow("Dark", "de-DE", false)]
-    [DataRow("Dark", "ar-SA", false)]
-    [DataRow("Dark", "zh-CN", true)]
-    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses)
+    [DataRow("Light", "zh-CN", false, false)]
+    [DataRow("Dark", "de-DE", false, false)]
+    [DataRow("Dark", "ar-SA", false, false)]
+    [DataRow("Dark", "zh-CN", true, false)]
+    [DataRow("Light", "zh-CN", false, true)]
+    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses, bool serverStatus)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, theme, language); await window.ShowActivityReviewAsync(true);
         ContentDialog? licenseDialog = null;
         Windows.Foundation.IAsyncOperation<ContentDialogResult>? licenseClosing = null;
+        ContentDialog? statusDialog = null; Task? statusClosing = null;
         if (licenses)
         {
             licenseDialog = new ContentDialog { Title = new LocalizationService(language)["OpenSourceLicenses"], Content = new LicensePanel(new(language)), CloseButtonText = new LocalizationService(language)["Close"], XamlRoot = window.ReviewRoot.XamlRoot, RequestedTheme = window.ReviewTheme };
             licenseClosing = licenseDialog.ShowAsync(); await MainWindow.SettleAsync();
         }
-        var directory = Path.GetFullPath(Path.Combine(MainWindow.ScreenshotDirectory, "..", "accessibility")); Directory.CreateDirectory(directory);
-        var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
-        var repo = new DirectoryInfo(AppContext.BaseDirectory);
-        while (repo is not null && !File.Exists(Path.Combine(repo.FullName, "CodexMonitor.sln"))) repo = repo.Parent;
-        Assert.IsNotNull(repo);
-        var scanId = $"view-{theme}-{language}" + (licenses ? "-licenses" : "");
-        var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var arg in new[] { "run", "--project", Path.Combine(repo.FullName, "tests", "CodexMonitor.Accessibility"), "--", Environment.ProcessId.ToString(), handle.ToInt64().ToString(), directory, scanId }) start.ArgumentList.Add(arg);
-        using var scanner = Process.Start(start)!;
-        var stdout = scanner.StandardOutput.ReadToEndAsync(); var stderr = scanner.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        await scanner.WaitForExitAsync(timeout.Token);
-        var scanFile = Path.Combine(directory, scanId + ".json");
-        Assert.IsTrue(File.Exists(scanFile), await stdout + await stderr); TestContext.AddResultFile(scanFile);
-        using var result = JsonDocument.Parse(await File.ReadAllTextAsync(scanFile));
-        Assert.IsTrue(result.RootElement.GetArrayLength() > 0, "The test must actually inspect the native window");
-        foreach (var scan in result.RootElement.EnumerateArray())
+        if (serverStatus)
         {
-            var file = scan.GetProperty("File").GetString(); if (file is not null && File.Exists(file)) TestContext.AddResultFile(file);
-            Assert.AreEqual(0, scan.GetProperty("ErrorCount").GetInt32(), scan.GetProperty("Errors").GetRawText());
+            await window.ConnectReviewServerAsync();
+            using var account = JsonDocument.Parse("""{"authMode":"chatgpt","planType":"pro"}""");
+            window.NotifyTranscriptReview(new("account/updated", account.RootElement.Clone()));
+            (statusDialog, statusClosing) = await window.OpenProtocolDetailsReviewAsync();
+            foreach (var popup in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(window.ReviewRoot.XamlRoot)) Expand(popup.Child);
+            await MainWindow.SettleAsync();
         }
-        if (licenseDialog is not null) { licenseDialog.Hide(); await licenseClosing!; }
+        try
+        {
+            var directory = Path.GetFullPath(Path.Combine(MainWindow.ScreenshotDirectory, "..", "accessibility")); Directory.CreateDirectory(directory);
+            var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
+            var repo = new DirectoryInfo(AppContext.BaseDirectory);
+            while (repo is not null && !File.Exists(Path.Combine(repo.FullName, "CodexMonitor.sln"))) repo = repo.Parent;
+            Assert.IsNotNull(repo);
+            var scanId = $"view-{theme}-{language}" + (licenses ? "-licenses" : serverStatus ? "-server-status" : "");
+            TestContext.AddResultFile(await window.CaptureReviewAsync(scanId, statusDialog ?? licenseDialog));
+            var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var arg in new[] { "run", "--project", Path.Combine(repo.FullName, "tests", "CodexMonitor.Accessibility"), "--", Environment.ProcessId.ToString(), handle.ToInt64().ToString(), directory, scanId }) start.ArgumentList.Add(arg);
+            using var scanner = Process.Start(start)!;
+            var stdout = scanner.StandardOutput.ReadToEndAsync(); var stderr = scanner.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            await scanner.WaitForExitAsync(timeout.Token);
+            Assert.AreEqual(0, scanner.ExitCode, await stdout + await stderr);
+            var scanFile = Path.Combine(directory, scanId + ".json");
+            Assert.IsTrue(File.Exists(scanFile), await stdout + await stderr); TestContext.AddResultFile(scanFile);
+            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(scanFile));
+            Assert.IsTrue(result.RootElement.GetArrayLength() > 0, "The test must actually inspect the native window");
+            foreach (var scan in result.RootElement.EnumerateArray())
+            {
+                var file = scan.GetProperty("File").GetString(); if (file is not null && File.Exists(file)) TestContext.AddResultFile(file);
+                Assert.AreEqual(0, scan.GetProperty("ErrorCount").GetInt32(), scan.GetProperty("Errors").GetRawText());
+            }
+        }
+        finally
+        {
+            if (licenseDialog is not null) { licenseDialog.Hide(); await licenseClosing!; }
+            if (statusDialog is not null) { statusDialog.Hide(); await statusClosing!; }
+        }
+        static void Expand(DependencyObject parent)
+        {
+            if (parent is Expander section) section.IsExpanded = true;
+            for (int i = 0; i < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent); i++) Expand(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i));
+        }
     }
     [UITestMethod]
     [DataRow("Light", "zh-CN", false)]

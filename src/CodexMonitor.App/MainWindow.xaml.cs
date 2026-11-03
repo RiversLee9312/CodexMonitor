@@ -62,6 +62,7 @@ public sealed partial class MainWindow : Window
     private long _selectedLength = -1;
     private long _transcriptReadGeneration;
     private ServerRead? _serverRead;
+    private readonly Dictionary<string, TranscriptEntry> _serverEvents = [];
     private sealed record ServerRead(CodexClient Client, string SessionId, long Generation, List<RpcMessage> Messages);
     private Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
     private readonly Microsoft.UI.System.ThemeSettings _themeSettings;
@@ -479,6 +480,7 @@ public sealed partial class MainWindow : Window
         {
             var wasConnected = _client is { IsConnected: true };
             if (_client is not null) { var old = _client; _client = null; _attached.Clear(); InvalidateTranscriptRead(); await old.DisposeAsync(); }
+            _serverEvents.Clear();
             if (!wasConnected)
             {
                 if (!_settings.UseSharedServer) _resolveExecutable(_settings.Executable);
@@ -570,7 +572,7 @@ public sealed partial class MainWindow : Window
         });
     }
     private void InvalidateTranscriptRead()
-    { ++_transcriptReadGeneration; _selectionCts?.Cancel(); _serverRead = null; }
+    { ++_transcriptReadGeneration; _selectionCts?.Cancel(); _serverRead = null; if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;
@@ -611,7 +613,7 @@ public sealed partial class MainWindow : Window
                 client.Rpc.Message += duringJoin;
                 var joined = await client.WithActiveTurnAsync(await client.ResumeAsync(session.Id, ct), ct);
                 if (_selected?.Id != session.Id) return;
-                var old = _client; _client = next; next = null; _attached.Clear(); ObserveClient(client);
+                var old = _client; _client = next; next = null; _attached.Clear(); _serverEvents.Clear(); ObserveClient(client);
                 client.Rpc.Message -= duringJoin;
                 _connectionEndpoint = match.Server.Endpoint;
                 if (old is not null) await old.DisposeAsync();
@@ -726,80 +728,32 @@ public sealed partial class MainWindow : Window
     {
         if (!ReferenceEquals(client, _client) || _closing || !client.IsConnected) return;
         if (message.Id is not null) { _ = HandleRequestAsync(client, message); return; }
+        message = RecordedEvents.Normalize(message);
         var p = message.Parameters;
+        if (ProtocolEventCatalog.Notifications.TryGetValue(message.Method, out var definition) && definition.Route == ProtocolEventRoute.Server)
+        {
+            if (TranscriptEvents.Parse(message.Method, p, DateTimeOffset.Now) is { } systemEvent) _serverEvents[systemEvent.Id] = systemEvent;
+            return;
+        }
         UpdateSessionActivity(message);
         var threadId = p.Str("threadId");
-        if (_selected is null || !_attached.Contains(_selected.Id) || threadId != _selected.Id && !(threadId.Length == 0 && message.Method is "warning" or "configWarning" or "account/rateLimits/updated")) return;
-        if (_serverRead is { } reading && ReferenceEquals(reading.Client, client) && reading.SessionId == threadId)
+        if (_selected is null || !_attached.Contains(_selected.Id) || threadId != _selected.Id && !(threadId.Length == 0 && TranscriptEvents.IsGlobal(message.Method))) return;
+        if (_serverRead is { } reading && ReferenceEquals(reading.Client, client) && (reading.SessionId == threadId || threadId.Length == 0))
         { reading.Messages.Add(message); return; }
-        if (message.Method == "model/safetyBuffering/updated" && p.Field("showBufferingUi").ValueKind == JsonValueKind.False && _snapshot is not null)
-        { _snapshot = _snapshot with { Entries = _snapshot.Entries.Where(e => e.Tool?.CategoryKey != "EventBuffering").ToArray() }; RenderMessages(); }
-        if (TranscriptEvents.Parse(message.Method, p, DateTimeOffset.Now) is { } activity) UpsertTranscriptEntry(activity);
+        var previous = _snapshot?.Entries ?? Array.Empty<TranscriptEntry>();
+        var entries = TranscriptUpdates.Apply(previous, message.Method, p, DateTimeOffset.Now);
+        if (!ReferenceEquals(previous, entries)) { _snapshot = _snapshot is null ? new(_selected, entries) : _snapshot with { Session = _selected, Entries = entries }; RenderMessages(); }
         switch (message.Method)
         {
             case "turn/started":
                 _selected = _selected with { State = SessionState.Active, ActiveTurnId = p.Field("turn").Str("id") }; break;
             case "turn/completed":
-                _selected = _selected with { ActiveTurnId = null, State = p.Field("turn").Str("status") switch { "failed" => SessionState.Error, "interrupted" => SessionState.Interrupted, _ => SessionState.Completed } };
-                break;
-            case "item/agentMessage/delta":
-                var id = p.Str("itemId");
-                if (_snapshot is null) _snapshot = new(_selected, []);
-                var list = _snapshot.Entries.ToList(); var at = list.FindIndex(e => e.Id == id);
-                if (at < 0) list.Add(new(id, EntryKind.Assistant, p.Str("delta"), DateTimeOffset.Now));
-                else list[at] = list[at] with { Text = list[at].Text + p.Str("delta") };
-                _snapshot = _snapshot with { Entries = list }; RenderMessages(); break;
-            case "item/reasoning/summaryTextDelta":
-            case "item/reasoning/textDelta":
-                var summaryId = p.Str("itemId");
-                if (_snapshot is null) _snapshot = new(_selected, []);
-                var summaries = _snapshot.Entries.ToList(); var summaryAt = summaries.FindIndex(e => e.Id == summaryId);
-                var prior = summaryAt < 0 ? null : summaries[summaryAt];
-                var reasoning = prior?.Reasoning ?? new ReasoningContent(prior?.Text ?? "", "");
-                reasoning = message.Method == "item/reasoning/summaryTextDelta" ? reasoning with { Summary = reasoning.Summary + p.Str("delta") } : reasoning with { FullText = reasoning.FullText + p.Str("delta") };
-                var updatedReasoning = new TranscriptEntry(summaryId, EntryKind.Reasoning, reasoning.DisplayText, prior?.Timestamp ?? DateTimeOffset.Now, Reasoning: reasoning);
-                if (summaryAt < 0) summaries.Add(updatedReasoning); else summaries[summaryAt] = updatedReasoning;
-                _snapshot = _snapshot with { Entries = summaries }; RenderMessages(); break;
-            case "item/reasoning/summaryPartAdded":
-                if (_snapshot is null) break;
-                var parts = _snapshot.Entries.ToList(); var partAt = parts.FindIndex(e => e.Id == p.Str("itemId"));
-                if (partAt >= 0 && parts[partAt].Reasoning is { Summary.Length: > 0 } part && !part.Summary.EndsWith('\n'))
-                { part = part with { Summary = part.Summary + "\n\n" }; parts[partAt] = parts[partAt] with { Text = part.DisplayText, Reasoning = part }; _snapshot = _snapshot with { Entries = parts }; RenderMessages(); }
-                break;
-            case "item/plan/delta":
-                var planId = p.Str("itemId");
-                var existingPlan = _snapshot?.Entries.FirstOrDefault(e => e.Id == planId);
-                var planText = (existingPlan?.Tool?.Input ?? "") + p.Str("delta");
-                UpsertTranscriptEntry(new(planId, EntryKind.Event, planText, existingPlan?.Timestamp ?? DateTimeOffset.Now,
-                    "plan", Tool: new("plan", planText, State: ToolActivityState.Running, SummaryOverride: planText, CategoryOverride: "ToolPlan")));
-                break;
-            case "item/commandExecution/outputDelta":
-                if (_snapshot is null) break;
-                var commands = _snapshot.Entries.ToList(); var commandAt = commands.FindIndex(e => e.Id == p.Str("itemId"));
-                if (commandAt >= 0 && commands[commandAt].Tool is { } command)
-                {
-                    var output = (command.Output ?? "") + p.Str("delta");
-                    commands[commandAt] = commands[commandAt] with { Tool = command with { Output = output }, Text = command.Input + "\n" + output };
-                    _snapshot = _snapshot with { Entries = commands }; RenderMessages();
-                }
-                break;
-            case "item/started":
-            case "item/completed":
-                var entry = CodexClient.ParseItem(p.Field("item"), DateTimeOffset.Now, message.Method == "item/started" ? ToolActivityState.Running : ToolActivityState.Completed);
-                UpsertTranscriptEntry(entry); break;
+                _selected = _selected with { ActiveTurnId = null, State = p.Field("turn").Str("status") switch { "failed" => SessionState.Error, "interrupted" => SessionState.Interrupted, _ => SessionState.Completed } }; break;
             case "thread/status/changed":
                 var state = CodexClient.ParseState(p.Field("status"));
                 _selected = _selected with { State = state, IsLive = state != SessionState.Unknown, ActiveTurnId = state is SessionState.Active or SessionState.Waiting ? _selected.ActiveTurnId : null }; break;
         }
         UpdateTitle(); UpdateChrome();
-    }
-    private void UpsertTranscriptEntry(TranscriptEntry entry)
-    {
-        if (_selected is null) return;
-        _snapshot ??= new(_selected, []);
-        var entries = _snapshot.Entries.ToList(); var index = entries.FindIndex(x => x.Id == entry.Id);
-        if (index >= 0) entries[index] = entry with { Timestamp = entries[index].Timestamp }; else entries.Add(entry);
-        _snapshot = _snapshot with { Entries = entries }; RenderMessages();
     }
     private void UpdateSessionActivity(RpcMessage message)
     {
@@ -808,6 +762,10 @@ public sealed partial class MainWindow : Window
         var session = row.Session;
         var changed = message.Method switch
         {
+            "thread/name/updated" => session with { Title = p.Str("threadName", session.Title) },
+            "thread/archived" => session with { IsArchived = true },
+            "thread/unarchived" => session with { IsArchived = false },
+            "thread/closed" or "thread/deleted" => session with { IsLive = false, State = SessionState.Completed, ActiveTurnId = null },
             "turn/started" => session with { IsLive = true, State = SessionState.Active, ActiveTurnId = p.Field("turn").Str("id") },
             "turn/completed" => session with { IsLive = true, State = p.Field("turn").Str("status") switch
             { "failed" => SessionState.Error, "interrupted" => SessionState.Interrupted, _ => SessionState.Completed }, ActiveTurnId = null },
@@ -818,6 +776,7 @@ public sealed partial class MainWindow : Window
         {
             _sessions = _sessions.Select(s => s.Id == id ? changed : s).ToArray();
             row.Update(changed, _text, true, _selected?.Id == id);
+            if (_selected?.Id == id) _selected = changed;
         }
         if (message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/reasoning/textDelta" or "item/plan/delta" or "item/started" or "item/completed" or
             "turn/plan/updated" or "turn/diff/updated" or "error" or "warning") row.MarkUpdated(_selected?.Id == id);
@@ -918,7 +877,8 @@ public sealed partial class MainWindow : Window
         }
         finally { _dialogs.Release(); if (!_closing) AccessibilitySupport.RestoreFocus(returnFocus, SettingsButton); }
     }
-    private async void OnDetails(object sender, RoutedEventArgs e)
+    private async void OnDetails(object sender, RoutedEventArgs e) => await DetailsAsync();
+    private async Task DetailsAsync()
     {
         if (_selected is not { } s) return;
         var panel = new StackPanel { Spacing = 16, MaxWidth = 520 };
@@ -930,6 +890,19 @@ public sealed partial class MainWindow : Window
             row.Children.Add(new TextBlock { Text = _text[key], FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
             row.Children.Add(new TextBlock { Text = value, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FlowDirection = FlowDirection.LeftToRight });
             panel.Children.Add(row);
+        }
+        if (_serverEvents.Count > 0)
+        {
+            var statuses = new StackPanel { Spacing = 16 };
+            foreach (var status in _serverEvents.Values)
+            {
+                var content = new StackPanel { Spacing = 8 };
+                content.Children.Add(new TextBlock { Text = status.Label, TextWrapping = TextWrapping.Wrap, FlowDirection = FlowDirection.LeftToRight, IsTextSelectionEnabled = true });
+                if (status.Tool is { } tool) content.Children.Add(ActivityDetails.Render(tool, _text));
+                statuses.Children.Add(content);
+            }
+            var section = new Expander { Header = _text["ServerEvents"], Content = statuses, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            AutomationProperties.SetName(section, _text["ServerEvents"]); panel.Children.Add(section);
         }
         await ShowDialogAsync(new ContentDialog { Title = _text["Details"], Content = new ScrollViewer { Content = panel, MaxHeight = 520 }, CloseButtonText = _text["Close"] });
     }

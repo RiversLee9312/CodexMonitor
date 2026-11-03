@@ -15,6 +15,53 @@ public sealed class TranscriptTests
         var path = Path.Combine(_folder, "rollout.jsonl"); await File.WriteAllLinesAsync(path, lines);
         return await new TranscriptParser().ReadAsync(new SessionInfo { Id = "s", FilePath = path });
     }
+    [TestMethod]
+    public async Task LegacyPartialTextRemainsReadableAndACompletedMessageReplacesItsDraft()
+    {
+        var result = await Parse(
+            """{"type":"event_msg","payload":{"type":"agent_message_delta","delta":"Partial "}}""",
+            """{"type":"event_msg","payload":{"type":"agent_message_delta","delta":"reply"}}""",
+            """{"type":"event_msg","payload":{"type":"agent_message","message":"Completed reply"}}""",
+            """{"type":"event_msg","payload":{"type":"agent_reasoning_raw_content_delta","delta":"Unfinished thinking"}}""",
+            """{"type":"event_msg","payload":{"type":"future_event","message":"Retained","encrypted_content":"SECRET"}}""");
+        Assert.HasCount(3, result.Entries); Assert.AreEqual("Completed reply", result.Entries[0].Text);
+        Assert.AreEqual("Unfinished thinking", result.Entries.Single(e => e.Kind == EntryKind.Reasoning).Reasoning?.FullText);
+        var fallback = result.Entries.Single(e => e.RawJson is not null); StringAssert.Contains(fallback.Text, "Retained"); Assert.IsFalse(fallback.Text.Contains("SECRET"));
+    }
+    [TestMethod]
+    public async Task NativeCompletedMirrorsReplaceCallsWithoutDuplicatingMessagesOrWaits()
+    {
+        var result = await Parse(
+            """{"type":"response_item","payload":{"type":"function_call","call_id":"sleep-call","name":"clock.sleep","arguments":"{\"duration_ms\":30000}"}}""",
+            """{"type":"response_item","payload":{"type":"function_call_output","call_id":"sleep-call","output":"Sleep completed."}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","kind":"sleep","id":"sleep-call","durationMs":30000}}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a","content":[{"type":"Text","text":"A reply"}]}}}""",
+            """{"type":"event_msg","payload":{"type":"agent_message","message":"A reply"}}""");
+        Assert.HasCount(2, result.Entries); Assert.AreEqual(30000L, result.Entries[0].Tool?.WaitDurationMs); Assert.AreEqual(ToolActivityState.Completed, result.Entries[0].Tool?.State);
+        Assert.AreEqual("A reply", result.Entries[1].Text);
+    }
+    [TestMethod]
+    public async Task UnmirroredEventRepliesSurviveMixedModernAndLegacyRecordsAndRepeatedMessagesRemainDistinct()
+    {
+        var result = await Parse(
+            """{"type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"Question"}]}}""",
+            """{"type":"event_msg","payload":{"type":"agent_message","message":"Reply"}}""",
+            """{"type":"event_msg","payload":{"type":"agent_message","message":"Reply"}}""");
+        Assert.HasCount(3, result.Entries); Assert.HasCount(2, result.Entries.Where(e => e.Kind == EntryKind.Assistant).ToArray());
+    }
+    [TestMethod]
+    public async Task SdkJsonItemUpdatesAndCompletedMessagesUseTheSameProjection()
+    {
+        var result = await Parse(
+            """{"type":"thread.started","thread_id":"sdk"}""",
+            """{"type":"turn.started"}""",
+            """{"type":"item.started","item":{"id":"c","type":"command_execution","command":"pwd","status":"in_progress"}}""",
+            """{"type":"item.completed","item":{"id":"c","type":"command_execution","command":"pwd","status":"completed","aggregated_output":"D:/repo","exit_code":0}}""",
+            """{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"Finished"}}""",
+            """{"type":"turn.completed"}""");
+        Assert.HasCount(2, result.Entries); Assert.AreEqual(SessionState.Completed, result.Session.State);
+        Assert.AreEqual("ToolCommand", result.Entries[0].Tool?.CategoryKey); Assert.AreEqual("D:/repo", result.Entries[0].Tool?.Output); Assert.AreEqual("Finished", result.Entries[1].Text);
+    }
 
     [TestMethod]
     public async Task PartialTrailingRecordCanBeRetriedAfterConcurrentWriterCompletes()
