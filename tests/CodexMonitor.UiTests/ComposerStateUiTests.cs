@@ -14,6 +14,11 @@ public sealed class ComposerStateUiTests
         public Task<IReadOnlyList<SessionServerMatch>> FindAsync(string id, string home, string executable, string? endpoint = null, CancellationToken ct = default)
         { Calls++; return Task.FromResult<IReadOnlyList<SessionServerMatch>>([]); }
     }
+    private sealed class AvailableServer : ISessionServerLocator
+    {
+        public Task<IReadOnlyList<SessionServerMatch>> FindAsync(string id, string home, string executable, string? endpoint = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SessionServerMatch>>([new(new(new("ws://127.0.0.1:45123")), new() { Id = id, State = SessionState.Active, IsLive = true })]);
+    }
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
     [DataRow(SessionState.Completed, false, true, "zh-CN")]
@@ -26,6 +31,8 @@ public sealed class ComposerStateUiTests
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 600, "Dark", language);
         window.SetSessionStateReview(state, live);
+        window.ConfigureSessionConnectionReview(new AvailableServer(), (_, _) => throw new InvalidOperationException("A probe must not attach"));
+        await window.CheckSessionAvailabilityReviewAsync();
         Assert.AreEqual(resume, window.ReviewResumeButtonVisible); Assert.AreEqual(!resume, window.ReviewConnectionButtonVisible);
         Assert.IsFalse(window.ReviewComposerVisible);
         foreach (var (name, rect) in window.ReviewBounds()) Assert.IsTrue(rect.Bottom <= window.ReviewRoot.ActualHeight + 1 && rect.Right <= window.ReviewRoot.ActualWidth + 1, name);

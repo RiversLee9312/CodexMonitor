@@ -25,7 +25,11 @@ public sealed partial class MainWindow : Window
     private ISessionServerLocator _sessionServerLocator = new SessionServerLocator();
     private Func<SessionServerMatch, CancellationToken, Task<CodexClient>> _openSessionServer = null!;
     private readonly HashSet<string> _expandedActivities = [];
+    private readonly Dictionary<string, double> _activityScrollOffsets = [];
     private readonly Dictionary<string, string> _sessionConnectionFailures = [];
+    private readonly Dictionary<string, DateTimeOffset> _sessionServerCheckedAt = [];
+    private CancellationTokenSource? _sessionAvailabilityCancellation;
+    private string? _checkingSessionServerId;
     private Func<SessionInfo, CancellationToken, Task<SessionInfo>> _checkResumeState = null!;
     private bool _findingSessionServer;
     private string? _connectionEndpoint;
@@ -38,7 +42,6 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<SessionRow> _visibleSessionRows = [];
     private readonly Dictionary<string, SessionRow> _sessionRows = [];
     private readonly List<string> _sessionOrder = [];
-    private readonly TransitionCollection _sessionTransitions = [new AddDeleteThemeTransition(), new RepositionThemeTransition()];
     private readonly TransitionCollection _noSessionTransitions = [];
     private bool _sessionBaselineLoaded;
     private readonly Dictionary<string, string> _drafts = [];
@@ -52,7 +55,10 @@ public sealed partial class MainWindow : Window
     private bool _ready, _syncing, _connecting, _sending, _following = true, _closing;
     private readonly bool _reviewMode;
     private bool _cliMissing;
+    private string? _availabilityAnnouncement;
+    private bool _readingActivityHistory;
     private long _selectedLength = -1;
+    private readonly Microsoft.UI.System.ThemeSettings _themeSettings;
 
     public MainWindow() : this(false) { }
     internal MainWindow(bool reviewMode)
@@ -62,20 +68,25 @@ public sealed partial class MainWindow : Window
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
         _text = new(_settings.Language); _store = new(_settings.CodexHome);
         InitializeComponent();
-        Root.ActualThemeChanged += (_, _) => UpdateCaptionTheme();
+        _themeSettings = Microsoft.UI.System.ThemeSettings.CreateForWindowId(AppWindow.Id);
+        _themeSettings.Changed += OnSystemThemeChanged;
+        Root.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(Root);
+        Root.ActualThemeChanged += (_, _) => { UpdateCaptionTheme(); ApplyThemeSurface(); };
         Title = "Codex Monitor";
         ExtendsContentIntoTitleBar = true; SetTitleBar(TitleBar);
         SystemBackdrop = new MicaBackdrop();
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 860));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         MessageList.ItemsSource = _messages;
+        MessageList.ItemContainerTransitions = [];
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _timer = DispatcherQueue.CreateTimer(); _timer.Interval = TimeSpan.FromSeconds(3);
         _timer.Tick += async (_, _) => await RefreshAsync();
         Closed += async (_, _) =>
         {
-            _closing = true; _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel();
+            _closing = true; _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel(); _sessionAvailabilityCancellation?.Cancel();
+            _themeSettings.Changed -= OnSystemThemeChanged;
             if (_client is not null) await _client.DisposeAsync();
         };
         AddShortcut(VirtualKey.F, VirtualKeyModifiers.Control, () => ToggleFind(true));
@@ -116,6 +127,7 @@ public sealed partial class MainWindow : Window
     }
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        AccessibilitySupport.NormalizeIconsAfterLayout(Root);
         if (_reviewMode) { _ready = true; return; }
         var scale = Root.XamlRoot.RasterizationScale;
         var area = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary).WorkArea;
@@ -129,7 +141,7 @@ public sealed partial class MainWindow : Window
         Root.FlowDirection = _text.IsRightToLeft ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
         Root.Language = _text.LanguageTag;
         Root.RequestedTheme = _settings.Theme switch { "Dark" => ElementTheme.Dark, "Light" => ElementTheme.Light, _ => ElementTheme.Default };
-        Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        ApplyThemeSurface();
         AppTitle.Text = _text["AppName"]; SessionsHeading.Text = _text["Sessions"];
         SessionSearch.PlaceholderText = _text["SearchSessions"];
         AutomationProperties.SetName(SessionSearch, _text["SearchSessions"]);
@@ -137,12 +149,16 @@ public sealed partial class MainWindow : Window
         _syncing = true; SessionFilter.Items.Clear();
         foreach (var key in new[] { "AllSessions", "Active", "Archived" }) SessionFilter.Items.Add(_text[key]);
         SessionFilter.SelectedIndex = filter; _syncing = false;
-        AutomationProperties.SetName(SessionFilter, _text["Sessions"]);
+        AutomationProperties.SetName(SessionFilter, _text["SessionFilterLabel"]);
+        AutomationProperties.SetName(SessionList, _text["Sessions"]); AutomationProperties.SetName(MessageList, _text["Transcript"]);
         Label(NewButton, "NewSession"); Label(RefreshButton, "Refresh"); Label(SettingsButton, "Settings"); Label(PaneButton, "ShowSessions");
-        Label(FindButton, "SearchTranscript"); Label(MoreButton, "Details"); Label(CloseFindButton, "Close");
+        Label(FindButton, "SearchTranscript"); Label(MoreButton, "SessionActions"); Label(CloseFindButton, "Close");
+        AutomationProperties.SetAcceleratorKey(FindButton, "Ctrl+F"); AutomationProperties.SetAcceleratorKey(SessionSearch, "Ctrl+L");
+        AutomationProperties.SetAcceleratorKey(SettingsButton, "Ctrl+,"); AutomationProperties.SetAcceleratorKey(RefreshButton, "F5");
+        AutomationProperties.SetAcceleratorKey(SendButton, "Ctrl+Enter");
         DetailsMenu.Text = _text["Details"]; ExportMenu.Text = _text["Export"]; OpenFolderMenu.Text = _text["OpenFolder"];
         LatestButton.Content = _text["JumpToLatest"];
-        Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessagePlaceholder"]);
+        Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessageInput"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
         NoSessionsTitle.Text = _text["NoSessions"]; NoSessionsHint.Text = _text["NoSessionsHint"];
         WelcomeTitle.Text = _text["SelectSession"]; ApplyCliWelcomeState();
@@ -164,8 +180,24 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonHoverBackgroundColor = null;
         titleBar.ButtonPressedForegroundColor = null;
         titleBar.ButtonPressedBackgroundColor = null;
-        AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
-        AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        AppWindow.TitleBar.ButtonBackgroundColor = _themeSettings.HighContrast ? null : Microsoft.UI.Colors.Transparent;
+        AppWindow.TitleBar.ButtonInactiveBackgroundColor = _themeSettings.HighContrast ? null : Microsoft.UI.Colors.Transparent;
+    }
+    private void OnSystemThemeChanged(Microsoft.UI.System.ThemeSettings sender, object args) => DispatcherQueue.TryEnqueue(() =>
+    { if (!_closing) { ApplyThemeSurface(); UpdateCaptionTheme(); } });
+    private void ApplyThemeSurface()
+    {
+        if (_themeSettings.HighContrast)
+        {
+            SystemBackdrop = null;
+            var color = new Windows.UI.ViewManagement.UISettings().GetColorValue(Windows.UI.ViewManagement.UIColorType.Background);
+            Root.Background = new SolidColorBrush(color);
+        }
+        else
+        {
+            if (SystemBackdrop is not MicaBackdrop) SystemBackdrop = new MicaBackdrop();
+            Root.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
     }
     private void Label(DependencyObject control, string key)
     {
@@ -179,7 +211,6 @@ public sealed partial class MainWindow : Window
         Shell.DisplayMode = compact ? SplitViewDisplayMode.Overlay : SplitViewDisplayMode.Inline;
         if (changed) Shell.IsPaneOpen = !compact;
         PaneButton.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
-        ActivityNote.Visibility = e.NewSize.Width < 1040 ? Visibility.Collapsed : Visibility.Visible;
     }
     private void NoticeText(string key, InfoBarSeverity severity = InfoBarSeverity.Informational, string? detail = null)
     {
@@ -224,6 +255,7 @@ public sealed partial class MainWindow : Window
                     UpdateTitle(); UpdateChrome();
                     var length = File.Exists(updated.FilePath) ? new FileInfo(updated.FilePath).Length : -1;
                     if (!string.IsNullOrEmpty(updated.FilePath) && (length != _selectedLength || force)) await LoadTranscriptAsync(_selected, false);
+                    await CheckSessionAvailabilityAsync(force);
                 }
             }
         }
@@ -237,7 +269,7 @@ public sealed partial class MainWindow : Window
         var incoming = _sessions.ToDictionary(s => s.Id);
         var removed = _sessionOrder.Where(id => !incoming.ContainsKey(id)).ToArray();
         var added = _sessions.Where(s => !_sessionRows.ContainsKey(s.Id)).ToArray();
-        var animateStructure = _sessionBaselineLoaded && (removed.Length > 0 || added.Length > 0);
+        var announceNew = _sessionBaselineLoaded && added.Length > 0;
         var connected = _client is { IsConnected: true };
         foreach (var id in removed) { _sessionRows.Remove(id); _sessionOrder.Remove(id); }
         foreach (var session in _sessions)
@@ -258,7 +290,8 @@ public sealed partial class MainWindow : Window
         _syncing = true;
         try
         {
-            SessionList.ItemContainerTransitions = animateStructure ? _sessionTransitions : _noSessionTransitions;
+            // Changing list-wide transitions reanimates recycled existing rows and flashes the entire pane.
+            SessionList.ItemContainerTransitions = _noSessionTransitions;
             var visibleIds = visible.Select(row => row.Session.Id).ToHashSet();
             for (int i = _visibleSessionRows.Count - 1; i >= 0; i--) if (!visibleIds.Contains(_visibleSessionRows[i].Session.Id)) _visibleSessionRows.RemoveAt(i);
             for (int i = 0; i < visible.Length; i++)
@@ -268,6 +301,7 @@ public sealed partial class MainWindow : Window
         finally { _syncing = false; }
         NoSessionsPanel.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         SessionCount.Text = _text.Format("SessionCount", visible.Length);
+        if (announceNew) AccessibilitySupport.Announce(SessionCount, _text.Format("NewSessionsAvailable", _text.Number(added.Length)), "new-sessions");
     }
     private void OnSessionSearchChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) => ApplyFilter();
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e) { if (!_syncing) ApplyFilter(); }
@@ -276,15 +310,20 @@ public sealed partial class MainWindow : Window
     {
         if (_syncing || SessionList.SelectedItem is not SessionRow row) return;
         _sessionConnectCancellation?.Cancel();
+        _sessionAvailabilityCancellation?.Cancel();
         row.MarkRead();
         if (_selected is not null) _drafts[_selected.Id] = Composer.Text;
         _selected = row.Session; _snapshot = null; _selectedLength = -1; _following = true;
+        _readingActivityHistory = false;
+        _availabilityAnnouncement = null;
         Composer.Text = _drafts.GetValueOrDefault(_selected.Id, "");
         TranscriptSearch.Text = ""; Notice.IsOpen = false;
         WelcomePanel.Visibility = Visibility.Collapsed; Conversation.Visibility = Visibility.Visible;
         UpdateTitle(); UpdateChrome();
         if (Shell.DisplayMode == SplitViewDisplayMode.Overlay) Shell.IsPaneOpen = false;
+        var availability = CheckSessionAvailabilityAsync();
         await LoadTranscriptAsync(_selected, true);
+        await availability;
     }
     private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading)
     {
@@ -318,12 +357,16 @@ public sealed partial class MainWindow : Window
         if (_snapshot is null) { _messages.Clear(); return; }
         var query = TranscriptSearch.Text.Trim();
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
-        var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting });
+        var viewingId = _selected?.Id;
+        var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
+            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; LatestButton.Visibility = Visibility.Visible; } }, () => _following);
         // Virtualized ListView keeps the entire transcript accessible without an artificial history cutoff.
         if (reset) _messages.Clear();
-        var common = 0;
-        while (common < _messages.Count && common < rows.Count && _messages[common].Matches(rows[common])) common++;
-        while (_messages.Count > common) _messages.RemoveAt(_messages.Count - 1);
+        // Replace only changed rows. Rebuilding the tail discards virtualized scroll anchors.
+        var common = Math.Min(_messages.Count, rows.Count);
+        for (int i = 0; i < common; i++) if (!_messages[i].Matches(rows[i]))
+        { if (MessageList.ContainerFromIndex(i) is DependencyObject container) TranscriptCard.PreserveScroll(container, _messages[i]); _messages[i].Update(rows[i]); }
+        while (_messages.Count > rows.Count) _messages.RemoveAt(_messages.Count - 1);
         for (int i = common; i < rows.Count; i++) _messages.Add(rows[i]);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
@@ -332,36 +375,40 @@ public sealed partial class MainWindow : Window
     {
         SessionTitle.Text = _selected is null ? _text["Transcript"] : new SessionRow(_selected, _text).Title;
         SessionSubtitle.Text = _selected is null ? "" : $"{_selected.FolderName} · {_text.State(_selected.State)}";
+        ToolTipService.SetToolTip(SessionTitle, SessionTitle.Text); ToolTipService.SetToolTip(SessionSubtitle, SessionSubtitle.Text);
         FindButton.IsEnabled = MoreButton.IsEnabled = _selected is not null;
     }
     private void UpdateChrome()
     {
+        var actionHadFocus = AccessibilitySupport.ContainsFocus(SessionSetupActions) || AccessibilitySupport.ContainsFocus(ComposerActions) || AccessibilitySupport.ContainsFocus(Composer);
         var connected = _client is { IsConnected: true };
         foreach (var row in _sessionRows.Values) row.SetConnection(connected);
         DisconnectMenu.Text = _text["Disconnect"]; DisconnectMenu.IsEnabled = connected && !_connecting && !_findingSessionServer;
         DisconnectMenu.IsEnabled &= !_sending; SettingsButton.IsEnabled = !_connecting && !_findingSessionServer && !_sending;
-        ConnectionStatus.Text = _text[connected ? "ServerConnected" : "LocalFiles"];
-        ActivityNote.Text = connected ? "" : _text["ActivityNote"];
         NewButton.IsEnabled = !_connecting && !_findingSessionServer && !_sending;
         var attached = connected && _selected is not null && _attached.Contains(_selected.Id) && !_selected.IsArchived;
         var archived = _selected?.IsArchived == true;
         var showResume = _selected is not null && SessionConnectionPolicy.CanResume(_selected);
         var showConnect = _selected is not null && !archived && !showResume;
         var failure = _selected is not null ? _sessionConnectionFailures.GetValueOrDefault(_selected.Id) : null;
+        var checking = showConnect && failure is null && !_sessionServerCheckedAt.ContainsKey(_selected!.Id) && !_findingSessionServer;
         var needsTurn = attached && _selected?.State is SessionState.Active or SessionState.Waiting && string.IsNullOrEmpty(_selected.ActiveTurnId);
-        SessionSetupHelp.Visibility = !attached && !archived && failure is null ? Visibility.Visible : Visibility.Collapsed;
+        SessionSetupHelp.Visibility = !attached && !archived && failure is null && !checking ? Visibility.Visible : Visibility.Collapsed;
         SessionSetupActions.Visibility = !attached && !archived ? Visibility.Visible : Visibility.Collapsed;
         Composer.Visibility = ComposerActions.Visibility = attached ? Visibility.Visible : Visibility.Collapsed;
         ArchiveExplanation.Visibility = archived ? Visibility.Visible : Visibility.Collapsed;
         ResumeButton.Visibility = RestoreExplanation.Visibility = showResume && failure is null ? Visibility.Visible : Visibility.Collapsed;
-        SessionConnectButton.Visibility = ConnectExplanation.Visibility = showConnect && failure is null ? Visibility.Visible : Visibility.Collapsed;
+        SessionConnectButton.Visibility = ConnectExplanation.Visibility = showConnect && failure is null && !checking ? Visibility.Visible : Visibility.Collapsed;
+        SessionServerChecking.Visibility = !attached && checking ? Visibility.Visible : Visibility.Collapsed;
+        SessionServerCheckingRing.IsActive = !attached && checking;
+        SessionServerCheckingText.Text = _text["FindingSessionServer"];
         SessionConnectionUnavailable.Visibility = !archived && failure is not null ? Visibility.Visible : Visibility.Collapsed;
         SessionConnectionReason.Text = failure is not null ? _text[failure] : "";
         SessionConnectLabel.Text = _text[_findingSessionServer ? "FindingSessionServer" : _connecting ? "SessionConnecting" : "ConnectSession"];
         ResumeLabel.Text = _text[_sending && !attached ? "Loading" : "Resume"];
         RetrySessionConnectionMenu.Text = _text["CheckAgain"];
         RetrySessionConnectionMenu.Visibility = failure is not null || needsTurn ? Visibility.Visible : Visibility.Collapsed;
-        RetrySessionConnectionMenu.IsEnabled = !_findingSessionServer && !_connecting && !_sending;
+        RetrySessionConnectionMenu.IsEnabled = !_findingSessionServer && !_connecting && !_sending && _checkingSessionServerId != _selected?.Id;
         SessionConnectButton.IsEnabled = !_findingSessionServer && !_connecting && !_sending && _selected is { IsArchived: false } && (!attached || needsTurn);
         AutomationProperties.SetName(SessionConnectButton, _text["ConnectSessionHint"]);
         AutomationProperties.SetHelpText(SessionConnectButton, _text["ConnectSessionExplanation"]);
@@ -377,6 +424,13 @@ public sealed partial class MainWindow : Window
         ResumeButton.IsEnabled = !_sending && !_connecting && !_findingSessionServer && showResume;
         ToolTipService.SetToolTip(ResumeButton, _text["RestoreSessionExplanation"]);
         ComposerHint.Text = _text[active && !canSteer ? "RuntimeTurnUnavailable" : canSteer ? "SteerHint" : "SendHint"];
+        AutomationProperties.SetHelpText(Composer, ComposerHint.Text);
+        if (actionHadFocus && !Composer.IsEnabled && !ResumeButton.IsEnabled && SessionConnectButton.Visibility != Visibility.Visible)
+            MoreButton.Focus(FocusState.Programmatic);
+        var announcement = failure is null ? null : _selected?.Id + ":" + failure;
+        if (announcement != _availabilityAnnouncement && failure is not null)
+            AccessibilitySupport.Announce(SessionConnectionReason, _text[failure], "session-connection");
+        _availabilityAnnouncement = announcement;
     }
     private void OnComposerChanged(object sender, TextChangedEventArgs e) { if (_ready) UpdateChrome(); }
     private async void OnConnect(object sender, RoutedEventArgs e) => await ConnectAsync();
@@ -414,7 +468,56 @@ public sealed partial class MainWindow : Window
     {
         if (_selected is not { } session || _findingSessionServer || _connecting || _sending) return;
         _sessionConnectionFailures.Remove(session.Id); UpdateChrome();
-        if (SessionConnectionPolicy.CanResume(session)) await ResumeAsync(); else await ConnectSessionAsync();
+        if (SessionConnectionPolicy.CanResume(session)) await ResumeAsync();
+        else if (_attached.Contains(session.Id)) await ConnectSessionAsync();
+        else await CheckSessionAvailabilityAsync(true);
+    }
+    private async Task CheckSessionAvailabilityAsync(bool force = false)
+    {
+        if (_selected is { } history && SessionConnectionPolicy.CanResume(history))
+        {
+            if (_sessionConnectionFailures.GetValueOrDefault(history.Id) is "SessionServerNotFound" or "SessionServerLookupFailed")
+            { _sessionConnectionFailures.Remove(history.Id); _sessionServerCheckedAt.Remove(history.Id); UpdateChrome(); }
+            return;
+        }
+        if (_closing || _selected is not { IsArchived: false } session ||
+            _client is { IsConnected: true } && _attached.Contains(session.Id) || _findingSessionServer || _connecting || _sending) return;
+        if (_checkingSessionServerId == session.Id && _sessionAvailabilityCancellation is { IsCancellationRequested: false }) return;
+        if (!force && _sessionServerCheckedAt.TryGetValue(session.Id, out var checkedAt) && DateTimeOffset.UtcNow - checkedAt < TimeSpan.FromSeconds(20)) return;
+        _sessionAvailabilityCancellation?.Cancel();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
+        _sessionAvailabilityCancellation = cancellation; _checkingSessionServerId = session.Id;
+        timeout.CancelAfter(TimeSpan.FromSeconds(25));
+        if (force) { _sessionServerCheckedAt.Remove(session.Id); _sessionConnectionFailures.Remove(session.Id); }
+        UpdateChrome();
+        try
+        {
+            var ct = timeout.Token;
+            var available = false;
+            if (_client is { IsConnected: true } client)
+            {
+                try { available = (await client.LoadedThreadIdsAsync(ct)).Contains(session.Id) && (await client.RuntimeAsync(session.Id, ct)).IsLive; }
+                catch (Exception e) when (e is IOException or RpcException or System.Net.WebSockets.WebSocketException) { }
+            }
+            if (!available) available = (await _sessionServerLocator.FindAsync(session.Id, _settings.CodexHome, _settings.Executable,
+                _connectionEndpoint ?? (_settings.UseSharedServer ? _settings.Endpoint : null), ct)).Count > 0;
+            // Probing never subscribes, resumes, or starts a turn. A late result must not replace another selection.
+            ct.ThrowIfCancellationRequested();
+            if (_selected?.Id != session.Id || _selected.IsArchived || SessionConnectionPolicy.CanResume(_selected)) return;
+            _sessionServerCheckedAt[session.Id] = DateTimeOffset.UtcNow;
+            if (available) _sessionConnectionFailures.Remove(session.Id);
+            else SetSessionConnectionFailure(session.Id, "SessionServerNotFound");
+        }
+        catch (Exception e) when (e is IOException or RpcException or OperationCanceledException or ArgumentException or System.Net.WebSockets.WebSocketException or System.Net.Sockets.SocketException)
+        {
+            if (!cancellation.IsCancellationRequested && ReferenceEquals(_sessionAvailabilityCancellation, cancellation) && _selected?.Id == session.Id)
+            { _sessionServerCheckedAt[session.Id] = DateTimeOffset.UtcNow; SetSessionConnectionFailure(session.Id, "SessionServerLookupFailed"); }
+        }
+        finally
+        {
+            if (ReferenceEquals(_sessionAvailabilityCancellation, cancellation)) { _sessionAvailabilityCancellation = null; _checkingSessionServerId = null; UpdateChrome(); }
+        }
     }
     private void ObserveClient(CodexClient client)
     {
@@ -427,6 +530,7 @@ public sealed partial class MainWindow : Window
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;
+        _sessionAvailabilityCancellation?.Cancel();
         using var cancellation = _sessionConnectCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         cancellation.CancelAfter(TimeSpan.FromSeconds(25));
         var ct = cancellation.Token; _findingSessionServer = true; UpdateChrome();
@@ -492,6 +596,7 @@ public sealed partial class MainWindow : Window
     private void ApplyAttachedSession(SessionInfo original, SessionInfo runtime)
     {
         _sessionConnectionFailures.Remove(original.Id);
+        _sessionServerCheckedAt[original.Id] = DateTimeOffset.UtcNow;
         _attached.Add(original.Id);
         var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = original.Model, FileVersion = original.FileVersion };
         _sessions = _sessions.Select(s => s.Id == original.Id ? joined : s).ToArray();
@@ -581,7 +686,11 @@ public sealed partial class MainWindow : Window
         if (message.Id is not null) { _ = HandleRequestAsync(client, message); return; }
         var p = message.Parameters;
         UpdateSessionActivity(message);
-        if (p.Str("threadId") != _selected?.Id) return;
+        var threadId = p.Str("threadId");
+        if (_selected is null || threadId != _selected.Id && !(threadId.Length == 0 && message.Method is "warning" or "configWarning" or "account/rateLimits/updated")) return;
+        if (message.Method == "model/safetyBuffering/updated" && p.Field("showBufferingUi").ValueKind == JsonValueKind.False && _snapshot is not null)
+        { _snapshot = _snapshot with { Entries = _snapshot.Entries.Where(e => e.Tool?.CategoryKey != "EventBuffering").ToArray() }; RenderMessages(); }
+        if (TranscriptEvents.Parse(message.Method, p, DateTimeOffset.Now) is { } activity) UpsertTranscriptEntry(activity);
         switch (message.Method)
         {
             case "turn/started":
@@ -603,6 +712,19 @@ public sealed partial class MainWindow : Window
                 if (summaryAt < 0) summaries.Add(new(summaryId, EntryKind.Reasoning, p.Str("delta"), DateTimeOffset.Now));
                 else summaries[summaryAt] = summaries[summaryAt] with { Text = summaries[summaryAt].Text + p.Str("delta") };
                 _snapshot = _snapshot with { Entries = summaries }; RenderMessages(); break;
+            case "item/reasoning/summaryPartAdded":
+                if (_snapshot is null) break;
+                var parts = _snapshot.Entries.ToList(); var partAt = parts.FindIndex(e => e.Id == p.Str("itemId"));
+                if (partAt >= 0 && parts[partAt].Text.Length > 0 && !parts[partAt].Text.EndsWith('\n'))
+                { parts[partAt] = parts[partAt] with { Text = parts[partAt].Text + "\n\n" }; _snapshot = _snapshot with { Entries = parts }; RenderMessages(); }
+                break;
+            case "item/plan/delta":
+                var planId = p.Str("itemId");
+                var existingPlan = _snapshot?.Entries.FirstOrDefault(e => e.Id == planId);
+                var planText = (existingPlan?.Tool?.Input ?? "") + p.Str("delta");
+                UpsertTranscriptEntry(new(planId, EntryKind.Event, planText, existingPlan?.Timestamp ?? DateTimeOffset.Now,
+                    "plan", Tool: new("plan", planText, State: ToolActivityState.Running, SummaryOverride: planText, CategoryOverride: "ToolPlan")));
+                break;
             case "item/commandExecution/outputDelta":
                 if (_snapshot is null) break;
                 var commands = _snapshot.Entries.ToList(); var commandAt = commands.FindIndex(e => e.Id == p.Str("itemId"));
@@ -615,16 +737,21 @@ public sealed partial class MainWindow : Window
                 break;
             case "item/started":
             case "item/completed":
-                var entry = CodexClient.ParseItem(p.Field("item"), DateTimeOffset.Now);
-                if (_snapshot is null) _snapshot = new(_selected, []);
-                var entries = _snapshot.Entries.ToList(); var index = entries.FindIndex(x => x.Id == entry.Id);
-                if (index >= 0) entries[index] = entry with { Timestamp = entries[index].Timestamp }; else entries.Add(entry);
-                _snapshot = _snapshot with { Entries = entries }; RenderMessages(); break;
+                var entry = CodexClient.ParseItem(p.Field("item"), DateTimeOffset.Now, message.Method == "item/started" ? ToolActivityState.Running : ToolActivityState.Completed);
+                UpsertTranscriptEntry(entry); break;
             case "thread/status/changed":
                 var state = CodexClient.ParseState(p.Field("status"));
                 _selected = _selected with { State = state, IsLive = state != SessionState.Unknown, ActiveTurnId = state is SessionState.Active or SessionState.Waiting ? _selected.ActiveTurnId : null }; break;
         }
         UpdateTitle(); UpdateChrome();
+    }
+    private void UpsertTranscriptEntry(TranscriptEntry entry)
+    {
+        if (_selected is null) return;
+        _snapshot ??= new(_selected, []);
+        var entries = _snapshot.Entries.ToList(); var index = entries.FindIndex(x => x.Id == entry.Id);
+        if (index >= 0) entries[index] = entry with { Timestamp = entries[index].Timestamp }; else entries.Add(entry);
+        _snapshot = _snapshot with { Entries = entries }; RenderMessages();
     }
     private void UpdateSessionActivity(RpcMessage message)
     {
@@ -644,7 +771,8 @@ public sealed partial class MainWindow : Window
             _sessions = _sessions.Select(s => s.Id == id ? changed : s).ToArray();
             row.Update(changed, _text, true, _selected?.Id == id);
         }
-        if (message.Method is "item/agentMessage/delta" or "item/started" or "item/completed") row.MarkUpdated(_selected?.Id == id);
+        if (message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/plan/delta" or "item/started" or "item/completed" or
+            "turn/plan/updated" or "turn/diff/updated" or "error" or "warning") row.MarkUpdated(_selected?.Id == id);
     }
     private async Task HandleRequestAsync(CodexClient client, RpcMessage message)
     {
@@ -675,7 +803,7 @@ public sealed partial class MainWindow : Window
         if (_messageScroll is not null) _messageScroll.ViewChanged += (_, args) =>
         {
             if (args.IsIntermediate) return;
-            _following = _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 80;
+            _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 80;
             LatestButton.Visibility = _following ? Visibility.Collapsed : Visibility.Visible;
         };
     }
@@ -685,23 +813,38 @@ public sealed partial class MainWindow : Window
         { var child = VisualTreeHelper.GetChild(root, i); if (child is T match) return match; if (FindVisual<T>(child) is { } nested) return nested; }
         return null;
     }
-    private void ScrollLatest() { if (_messages.Count > 0) MessageList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Leading); }
-    private void OnLatest(object sender, RoutedEventArgs e) { _following = true; ScrollLatest(); }
+    private void ScrollLatest()
+    {
+        if (_messages.Count == 0) return;
+        MessageList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Leading);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        { if (_following && _messages.Count > 0 && MessageList.ContainerFromIndex(_messages.Count - 1) is DependencyObject container) TranscriptCard.ScrollGroupToEnd(container, _messages[^1]); });
+    }
+    private void OnLatest(object sender, RoutedEventArgs e) { _readingActivityHistory = false; _following = true; ScrollLatest(); }
     private void OnTranscriptSearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RenderMessages(true); }
-    private void ToggleFind(bool open) { FindPanel.Visibility = open && _selected is not null ? Visibility.Visible : Visibility.Collapsed; if (open) TranscriptSearch.Focus(FocusState.Keyboard); else TranscriptSearch.Text = ""; }
+    private void ToggleFind(bool open)
+    {
+        var wasOpen = FindPanel.Visibility == Visibility.Visible;
+        FindPanel.Visibility = open && _selected is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (open) TranscriptSearch.Focus(FocusState.Keyboard);
+        else { TranscriptSearch.Text = ""; if (wasOpen) FindButton.Focus(FocusState.Programmatic); }
+        AccessibilitySupport.KeepIconsUnscaled(FindPanel);
+    }
     private void OnFind(object sender, RoutedEventArgs e) => ToggleFind(true);
     private void OnCloseFind(object sender, RoutedEventArgs e) => ToggleFind(false);
     private void OnTogglePane(object sender, RoutedEventArgs e) => Shell.IsPaneOpen = !Shell.IsPaneOpen;
     private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
     {
         await _dialogs.WaitAsync(_lifetime.Token);
+        var returnFocus = FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
         try
         {
             dialog.XamlRoot = Root.XamlRoot; dialog.RequestedTheme = Root.RequestedTheme;
             dialog.FlowDirection = Root.FlowDirection; dialog.Language = Root.Language;
+            dialog.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(dialog);
             return await dialog.ShowAsync();
         }
-        finally { _dialogs.Release(); }
+        finally { _dialogs.Release(); if (!_closing) AccessibilitySupport.RestoreFocus(returnFocus, SettingsButton); }
     }
     private async void OnDetails(object sender, RoutedEventArgs e)
     {
@@ -824,6 +967,7 @@ public sealed partial class MainWindow : Window
         var theme = new ComboBox { Header = _text["Theme"], HorizontalAlignment = HorizontalAlignment.Stretch };
         var themes = new[] { "System", "Light", "Dark" }; foreach (var key in themes) theme.Items.Add(_text[key]); theme.SelectedIndex = Math.Max(0, Array.IndexOf(themes, _settings.Theme));
         var language = new ComboBox { Header = _text["Language"], HorizontalAlignment = HorizontalAlignment.Stretch };
+        AutomationProperties.SetName(mode, _text["Connection"]); AutomationProperties.SetName(theme, _text["Theme"]); AutomationProperties.SetName(language, _text["Language"]);
         var languages = new[] { "" }.Concat(LocalizationService.AvailableLanguages).ToArray();
         foreach (var tag in languages) language.Items.Add(tag.Length == 0 ? _text["System"] : CultureInfo.GetCultureInfo(tag).NativeName);
         language.SelectedIndex = Math.Max(0, Array.IndexOf(languages, _settings.Language));
@@ -843,7 +987,7 @@ public sealed partial class MainWindow : Window
         try { _settings.Save(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
         _store = new(_settings.CodexHome); _text = new(_settings.Language);
-        if (changedConnection) _sessionConnectionFailures.Clear();
+        if (changedConnection) { _sessionAvailabilityCancellation?.Cancel(); _sessionServerCheckedAt.Clear(); _sessionConnectionFailures.Clear(); }
         Localize();
         if (changedConnection && _client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); NoticeText("RestartConnection"); }
         else NoticeText("Saved", InfoBarSeverity.Success);

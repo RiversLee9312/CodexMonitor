@@ -33,14 +33,31 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             return value;
         }
     }
-    public string CategoryKey => CategoryOverride ?? (WaitDurationMs is not null ? "ToolWaiting" : Input.Contains("*** Begin Patch", StringComparison.Ordinal) ? "ToolFileChanges" :
-        Input.Contains("write_stdin", StringComparison.Ordinal) ? "ToolReadOutput" : Name.Contains("search", StringComparison.OrdinalIgnoreCase) ? "ToolSearch" :
-        Name is "exec" or "shell" or "commandExecution" or "exec_command" || Input.Contains("exec_command", StringComparison.Ordinal) ? "ToolCommand" : "ToolDetails");
+    public string CategoryKey => CategoryOverride ?? InferCategory();
+    private string InferCategory()
+    {
+        if (WaitDurationMs is not null) return "ToolWaiting";
+        if (Input.Contains("*** Begin Patch", StringComparison.Ordinal) || Name is "apply_patch" or "fileChange") return "ToolFileChanges";
+        var name = Name.Split([".", "/", ":"], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? Name;
+        if (name == "write_stdin" || Input.Contains("write_stdin", StringComparison.Ordinal)) return "ToolReadOutput";
+        if (name is "view_image" or "imageView") return "ToolImageView";
+        if (name is "imagegen" or "imageGeneration" or "image_generation") return "ToolImageGeneration";
+        if (name is "read_file" or "readFile") return "ToolReadFile";
+        if (name is "list_dir" or "listFiles" or "list_directory") return "ToolListFiles";
+        if (name is "spawn_agent" or "send_message" or "wait_agent" or "followup_task" or "collabToolCall") return "ToolCollaboration";
+        if (name is "update_plan" or "plan") return "ToolPlan";
+        if (Name.StartsWith("mcp__", StringComparison.OrdinalIgnoreCase)) return "ToolMcp";
+        if (name.Contains("search", StringComparison.OrdinalIgnoreCase) || Input.Contains("\"search_query\"", StringComparison.Ordinal)) return "ToolSearch";
+        if (Input.Contains("\"open\"", StringComparison.Ordinal) && name == "run") return "ToolOpenPage";
+        if (Input.Contains("\"find\"", StringComparison.Ordinal) && name == "run") return "ToolFindInPage";
+        if (name is "exec" or "shell" or "commandExecution" or "exec_command" || Input.Contains("exec_command", StringComparison.Ordinal)) return "ToolCommand";
+        return "ToolDetails";
+    }
     public string Summary
     {
         get
         {
-            if (SummaryOverride is not null) return SummaryOverride;
+            if (SummaryOverride is not null) return Compact(SummaryOverride);
             if (WaitDurationMs is not null) return "";
             var value = DecodedInput;
             var file = Regex.Match(value, @"\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)");
@@ -51,9 +68,13 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
                 try { value = JsonSerializer.Deserialize<string>(command.Groups[1].Value) ?? value; } catch (JsonException) { }
             }
             if (CategoryKey == "ToolReadOutput") return "";
-            value = Regex.Replace(value, @"\s+", " ").Trim();
-            return value.Length > 180 ? value[..180] + "…" : value;
+            return Compact(value);
         }
+    }
+    private static string Compact(string value)
+    {
+        value = Regex.Replace(value, @"\s+", " ").Trim();
+        return value.Length > 180 ? value[..180] + "…" : value;
     }
     public IReadOnlyList<ToolActivity> DisplayParts()
     {
@@ -92,13 +113,38 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         long? duration = item.Field("durationMs").TryNumber(out var milliseconds) && milliseconds >= 0 ? milliseconds : null;
         return type switch
         {
-            "commandExecution" => new(type, item.Str("command"), item.Str("aggregatedOutput"), state, duration),
+            "commandExecution" => Command(item, state, duration),
             "fileChange" => new(type, item.Field("changes").TextValue(), State: state, DurationMs: duration,
                 SummaryOverride: string.Join(", ", item.Field("changes").Items().Select(c => Path.GetFileName(c.Str("path").Replace('/', Path.DirectorySeparatorChar)))), CategoryOverride: "ToolFileChanges"),
-            "webSearch" => new(type, item.GetRawText(), item.Field("results").TextValue(), state, duration, item.Str("query", item.Field("action").Str("query", item.Field("action").Str("url"))), "ToolSearch"),
-            "mcpToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration),
-            "dynamicToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("contentItems").TextValue(), state, duration),
+            "webSearch" or "web_search_call" => Web(item, state, duration),
+            "mcpToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("result").TextValue(), state, duration,
+                string.Join(" · ", new[] { item.Str("server"), item.Str("tool") }.Where(s => s.Length > 0)), "ToolMcp"),
+            "dynamicToolCall" => new(item.Str("tool", type), item.Field("arguments").TextValue(), item.Field("contentItems").TextValue(), state, duration, item.Str("tool"), "ToolDynamic"),
+            "collabToolCall" => new(type, JsonSerializer.Serialize(new { tool = item.Str("tool"), receiverThreadId = item.Str("receiverThreadId", item.Str("newThreadId")), prompt = item.Str("prompt") }), item.Field("agentStatus").TextValue(), state, duration, item.Str("tool") + " " + item.Str("receiverThreadId", item.Str("newThreadId")), "ToolCollaboration"),
+            "imageView" => new(type, item.Str("path"), State: state, DurationMs: duration, SummaryOverride: Path.GetFileName(item.Str("path").Replace('/', Path.DirectorySeparatorChar)), CategoryOverride: "ToolImageView"),
+            "imageGeneration" or "image_generation_call" => new(type, item.GetRawText(), State: state, DurationMs: duration, SummaryOverride: item.Str("revised_prompt", item.Str("prompt")), CategoryOverride: "ToolImageGeneration"),
+            "plan" => new(type, item.Str("text"), State: state, SummaryOverride: item.Str("text"), CategoryOverride: "ToolPlan"),
+            "contextCompaction" => new(type, "", State: state, SummaryOverride: "", CategoryOverride: "ToolCompaction"),
+            "enteredReviewMode" or "exitedReviewMode" => new(type, item.Str("review"), State: state, SummaryOverride: item.Str("review"), CategoryOverride: "ToolReview"),
+            "functionCallOutput" => new(item.Str("name", type), "", item.Field("output").TextValue(), state, duration, item.Str("namespace") + " " + item.Str("name"), "ToolReadOutput"),
             _ => new(type, item.GetRawText(), State: state, DurationMs: duration)
         };
+    }
+    private static ToolActivity Web(JsonElement item, ToolActivityState state, long? duration)
+    {
+        var action = item.Field("action");
+        var category = action.Str("type") switch { "openPage" or "open_page" => "ToolOpenPage", "findInPage" or "find_in_page" => "ToolFindInPage", _ => "ToolSearch" };
+        var query = item.Str("query", action.Str("query", string.Join(" · ", action.Field("queries").Items().Select(x => x.TextValue()))));
+        var summary = category == "ToolFindInPage" ? action.Str("pattern") + " · " + action.Str("url") : category == "ToolOpenPage" ? action.Str("url") : query;
+        var input = action.ValueKind == JsonValueKind.Object ? action.GetRawText() : JsonSerializer.Serialize(new { query });
+        return new(item.Str("type"), input, item.Field("results").TextValue(), state, duration, summary, category);
+    }
+    private static ToolActivity Command(JsonElement item, ToolActivityState state, long? duration)
+    {
+        var actions = item.Field("commandActions").Items().ToArray();
+        var action = actions.Length == 1 ? actions[0] : default;
+        var category = action.Str("type") switch { "read" => "ToolReadFile", "listFiles" => "ToolListFiles", "search" => "ToolSearch", _ => "ToolCommand" };
+        var summary = category == "ToolCommand" ? null : action.Str("path", action.Str("query", action.Str("command", item.Str("command"))));
+        return new("commandExecution", item.Str("command"), item.Str("aggregatedOutput"), state, duration, summary, category);
     }
 }

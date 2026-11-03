@@ -11,7 +11,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.3" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new { clientInfo = new { name = "codex_monitor", title = "Codex Monitor", version = "0.1.4" }, capabilities = new { experimentalApi = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new { }, ct).ConfigureAwait(false);
     }
@@ -102,20 +102,21 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
         return entries;
     }
 
-    public static TranscriptEntry ParseItem(JsonElement item, DateTimeOffset timestamp = default)
+    public static TranscriptEntry ParseItem(JsonElement item, DateTimeOffset timestamp = default, ToolActivityState? lifecycle = null)
     {
         var type = item.Str("type");
         var kind = type switch { "userMessage" => EntryKind.User, "agentMessage" => EntryKind.Assistant, "reasoning" => EntryKind.Reasoning,
-            "commandExecution" or "fileChange" or "mcpToolCall" or "dynamicToolCall" or "webSearch" => EntryKind.Tool, _ => EntryKind.Event };
+            "commandExecution" or "fileChange" or "mcpToolCall" or "dynamicToolCall" or "webSearch" or "collabToolCall" or "imageView" or "imageGeneration" or "functionCallOutput" => EntryKind.Tool, _ => EntryKind.Event };
         var text = type switch
         {
             "userMessage" => string.Join("\n", item.Field("content").Items().Select(x => x.Str("text", x.Str("type")))),
-            "agentMessage" => item.Str("text"),
-            "reasoning" => string.Join("\n", item.Field("summary").Items().Select(x => x.TextValue())),
+            "agentMessage" or "plan" => item.Str("text"),
+            "reasoning" => string.Join("\n", item.Field("summary").Items().Select(x => x.ValueKind == JsonValueKind.Object ? x.Str("text") : x.TextValue())),
             "commandExecution" => item.Str("command") + "\n" + item.Str("aggregatedOutput"),
             _ => item.GetRawText()
         };
-        var tool = kind == EntryKind.Tool ? ToolActivity.FromItem(item) : null;
+        var tool = kind == EntryKind.Tool || type is "plan" or "contextCompaction" or "enteredReviewMode" or "exitedReviewMode" ? ToolActivity.FromItem(item) : null;
+        if (tool is { State: ToolActivityState.Unknown } && lifecycle is { } state) tool = tool with { State = state };
         return new(item.Str("id", Guid.NewGuid().ToString()), kind, text, timestamp, type, Tool: tool);
     }
     public static SessionState ParseState(JsonElement status) => status.Str("type") switch

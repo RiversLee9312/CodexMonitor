@@ -39,6 +39,75 @@ public sealed class SessionConnectionUiTests
         public async Task<string?> ReceiveAsync(CancellationToken ct) => await _incoming.Reader.ReadAsync(ct);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+    private sealed class DeferredLocator : ISessionServerLocator
+    {
+        public int Calls { get; private set; }
+        public TaskCompletionSource<IReadOnlyList<SessionServerMatch>> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<IReadOnlyList<SessionServerMatch>> FindAsync(string id, string home, string executable, string? endpoint = null, CancellationToken ct = default)
+        { Calls++; return Result.Task; } // Deliberately ignores cancellation to exercise late replies.
+    }
+    [UITestMethod]
+    [DataRow("zh-CN", "Dark")]
+    [DataRow("zh-CN", "Light")]
+    [DataRow("de-DE", "Light")]
+    [DataRow("ar-SA", "Dark")]
+    public async Task SelectionChecksAvailabilityBeforeOfferingConnectAndCachesNoOwner(string language, string theme)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 600, theme, language);
+        window.SetSessionStateReview(SessionState.RecordedActive);
+        var lookup = new DeferredLocator(); var opened = false;
+        window.ConfigureSessionConnectionReview(lookup, (_, _) => { opened = true; throw new InvalidOperationException(); });
+        var checking = window.CheckSessionAvailabilityReviewAsync();
+        Assert.IsTrue(window.ReviewServerChecking); Assert.IsFalse(window.ReviewConnectionButtonVisible);
+        Assert.IsFalse(window.ReviewConnectionHelpVisible); Assert.IsFalse(window.ReviewComposerVisible);
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"session-checking-560-{theme}-{language}"));
+        lookup.Result.SetResult([]); await checking;
+        Assert.IsFalse(window.ReviewServerChecking); Assert.IsFalse(window.ReviewConnectionButtonVisible);
+        Assert.AreEqual(new LocalizationService(language)["SessionServerNotFound"], window.ReviewConnectionReason);
+        Assert.IsFalse(opened); Assert.IsFalse(window.ReviewBannerOpen); Assert.IsFalse(window.ReviewSessionAttached);
+        await window.CheckSessionAvailabilityReviewAsync(); Assert.AreEqual(1, lookup.Calls, "A transcript refresh must reuse the recent result");
+        foreach (var (name, rect) in window.ReviewBounds()) Assert.IsTrue(rect.Right <= window.ReviewRoot.ActualWidth + 1 && rect.Bottom <= window.ReviewRoot.ActualHeight + 1, name);
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"session-unavailable-560-{theme}-{language}"));
+    }
+    [UITestMethod]
+    public async Task AvailabilityProbeOffersConnectWithoutOpeningOrResumingAndRetryOnlyChecks()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        window.SetSessionStateReview(SessionState.RecordedActive);
+        var opened = false;
+        window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => { opened = true; throw new InvalidOperationException(); });
+        await window.CheckSessionAvailabilityReviewAsync();
+        Assert.IsTrue(window.ReviewConnectionButtonVisible); Assert.IsTrue(window.ReviewConnectionHelpVisible);
+        Assert.IsFalse(window.ReviewResumeButtonVisible); Assert.IsFalse(opened); Assert.IsFalse(window.ReviewSessionAttached);
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        await window.RetrySessionActionReviewAsync(); Assert.IsFalse(window.ReviewConnectionButtonVisible);
+        window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => throw new InvalidOperationException());
+        await window.RetrySessionActionReviewAsync(); Assert.IsTrue(window.ReviewConnectionButtonVisible);
+        Assert.IsFalse(window.ReviewComposerVisible); Assert.IsFalse(window.ReviewSessionAttached);
+    }
+    [UITestMethod]
+    public async Task LateAvailabilityResultCannotOverwriteTheNextSelectedSession()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        window.SetSessionStateReview(SessionState.RecordedActive);
+        var old = new DeferredLocator(); window.ConfigureSessionConnectionReview(old, (_, _) => throw new InvalidOperationException());
+        var checking = window.CheckSessionAvailabilityReviewAsync();
+        window.ChangeSelectedSessionReview("next-session");
+        window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => throw new InvalidOperationException());
+        await window.CheckSessionAvailabilityReviewAsync();
+        old.Result.SetResult([]); await checking;
+        Assert.IsTrue(window.ReviewConnectionButtonVisible); Assert.AreEqual("", window.ReviewConnectionReason);
+    }
+    [UITestMethod]
+    public async Task HistoryCompletionReplacesAnOldAvailabilityFailureWithRestore()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        window.SetSessionStateReview(SessionState.RecordedActive);
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        await window.CheckSessionAvailabilityReviewAsync(); Assert.IsFalse(window.ReviewResumeButtonVisible);
+        window.SetSessionStateReview(SessionState.Completed); await window.CheckSessionAvailabilityReviewAsync();
+        Assert.IsTrue(window.ReviewResumeButtonVisible); Assert.AreEqual("", window.ReviewConnectionReason);
+    }
     [UITestMethod]
     public async Task NoOwnerLeavesSessionReadOnlyAndShowsAnAccurateExplanation()
     {
@@ -48,7 +117,7 @@ public sealed class SessionConnectionUiTests
         window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => { opened = true; throw new InvalidOperationException(); });
         await window.ConnectSessionReviewAsync();
         Assert.IsFalse(opened); Assert.IsFalse(window.ReviewSessionAttached); Assert.IsFalse(window.ReviewCanCompose);
-        StringAssert.Contains(window.ReviewConnectionReason, "共享服务器"); Assert.IsFalse(window.ReviewCanResume);
+        StringAssert.Contains(window.ReviewConnectionReason, "应用服务器"); Assert.IsFalse(window.ReviewCanResume);
         Assert.IsFalse(window.ReviewBannerOpen); Assert.IsFalse(window.ReviewConnectionButtonVisible); Assert.IsFalse(window.ReviewConnectionHelpVisible);
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-no-owner-560-light-zh"));
         var runtime = new Runtime();

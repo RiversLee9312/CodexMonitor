@@ -17,11 +17,14 @@
     <!-- Compile the production view and styles, rather than a replica used only by tests. -->
     <Compile Include="..\..\src\CodexMonitor.App\MainWindow.xaml.cs" Link="MainWindow.xaml.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\Presentation.cs" Link="Presentation.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\ActivityDetails.cs" Link="ActivityDetails.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\ActivityIcon.cs" Link="ActivityIcon.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\AccessibilitySupport.cs" Link="AccessibilitySupport.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ServerDiscoveryPanel.cs" Link="ServerDiscoveryPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\HomeDiscoveryPanel.cs" Link="HomeDiscoveryPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\CliSetupPanel.cs" Link="CliSetupPanel.cs"/>
     <Page Include="..\..\src\CodexMonitor.App\MainWindow.xaml" Link="MainWindow.xaml"/>
     <Page Include="..\..\src\CodexMonitor.App\Styles.xaml" Link="Styles.xaml"/>
-    <Content Include="..\..\src\CodexMonitor.App\Assets\*" Link="Assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/>
+    <Content Include="..\..\src\CodexMonitor.App\Assets\**\*" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest"/>
   </ItemGroup>
 </Project>

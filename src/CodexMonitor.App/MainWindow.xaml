@@ -3,10 +3,10 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:local="using:CodexMonitor.App">
   <Grid x:Name="Root" Loaded="OnLoaded" SizeChanged="OnSizeChanged" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
-    <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/><RowDefinition Height="32"/></Grid.RowDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto" MinHeight="40"/><RowDefinition Height="*"/><RowDefinition Height="Auto" MinHeight="32"/></Grid.RowDefinitions>
     <Grid x:Name="TitleBar" Background="Transparent" Margin="16,0,140,0" FlowDirection="LeftToRight">
       <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-      <Image Source="Assets/AppIcon.png" Width="22" Height="22" AutomationProperties.AccessibilityView="Raw"/>
+      <Image Source="Assets/AppIcon.png" Width="24" Height="24" AutomationProperties.AccessibilityView="Raw"/>
       <TextBlock x:Name="AppTitle" Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0" Style="{ThemeResource CaptionTextBlockStyle}"/>
     </Grid>
     <SplitView x:Name="Shell" Grid.Row="1" IsPaneOpen="True" DisplayMode="Inline" OpenPaneLength="320" PaneBackground="{ThemeResource SolidBackgroundFillColorBaseBrush}" LightDismissOverlayMode="On">
@@ -15,17 +15,18 @@
           <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="SessionsHeading" Style="{ThemeResource SubtitleTextBlockStyle}" VerticalAlignment="Center"/>
-            <Button x:Name="NewButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnNewSession"><FontIcon Glyph="&#xE710;" FontSize="16"/></Button>
+            <TextBlock x:Name="SessionsHeading" AutomationProperties.HeadingLevel="1" Style="{ThemeResource SubtitleTextBlockStyle}" VerticalAlignment="Center"/>
+            <Button x:Name="NewButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnNewSession"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE710;" FontSize="16"/></Button>
           </Grid>
           <AutoSuggestBox x:Name="SessionSearch" Grid.Row="1" TextChanged="OnSessionSearchChanged" QueryIcon="Find" MinHeight="40"/>
           <Grid Grid.Row="2" ColumnSpacing="12">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="SessionFilter" HorizontalAlignment="Stretch" SelectionChanged="OnFilterChanged" MinHeight="36"/>
-            <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon Glyph="&#xE72C;" FontSize="16"/></Button>
+            <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE72C;" FontSize="16"/></Button>
           </Grid>
           <Grid Grid.Row="3">
             <ListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
+              <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
               <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></ListView.ItemContainerStyle>
               <ListView.ItemTemplate>
                 <DataTemplate x:DataType="local:SessionRow">
@@ -41,7 +42,7 @@
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <Grid ColumnSpacing="6">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                        <FontIcon x:Name="RunningGlyph" Glyph="&#xE768;" FontSize="11" VerticalAlignment="Center" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind RunningVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind RunningText, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw"/>
+                        <FontIcon IsTextScaleFactorEnabled="False" x:Name="RunningGlyph" Glyph="&#xE768;" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind RunningVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind RunningText, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw"/>
                         <TextBlock Grid.Column="1" Text="{x:Bind State, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
                       </Grid>
                       <TextBlock Grid.Column="1" Text="{x:Bind Time, Mode=OneWay}" Margin="8,0,0,0" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
@@ -55,7 +56,7 @@
               <TextBlock x:Name="NoSessionsHint" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             </StackPanel>
           </Grid>
-          <Button x:Name="SettingsButton" Grid.Row="4" HorizontalAlignment="Left" Style="{StaticResource IconButtonStyle}" Click="OnSettings"><FontIcon Glyph="&#xE713;" FontSize="18"/></Button>
+          <Button x:Name="SettingsButton" Grid.Row="4" HorizontalAlignment="Left" Style="{StaticResource IconButtonStyle}" Click="OnSettings"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE713;" FontSize="20"/></Button>
         </Grid>
       </SplitView.Pane>
       <Border Margin="0,8,12,0" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8">
@@ -64,29 +65,29 @@
           <InfoBar x:Name="Notice" IsOpen="False" IsClosable="True" Margin="12,12,12,0" Severity="Informational"/>
           <Grid Grid.Row="1" Margin="16,12" ColumnSpacing="12">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <Button x:Name="PaneButton" Style="{StaticResource IconButtonStyle}" Visibility="Collapsed" Click="OnTogglePane" VerticalAlignment="Top"><FontIcon Glyph="&#xE700;" FontSize="16"/></Button>
+            <Button x:Name="PaneButton" Style="{StaticResource IconButtonStyle}" Visibility="Collapsed" Click="OnTogglePane" VerticalAlignment="Top"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE700;" FontSize="16"/></Button>
             <StackPanel Grid.Column="1" Spacing="4">
-              <TextBlock x:Name="SessionTitle" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
+              <TextBlock x:Name="SessionTitle" AutomationProperties.HeadingLevel="1" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
               <TextBlock x:Name="SessionSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}"/>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
-              <Button x:Name="FindButton" Style="{StaticResource IconButtonStyle}" Click="OnFind"><FontIcon Glyph="&#xE721;" FontSize="16"/></Button>
-              <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}"><FontIcon Glyph="&#xE712;" FontSize="16"/>
+              <Button x:Name="FindButton" Style="{StaticResource IconButtonStyle}" Click="OnFind"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE721;" FontSize="16"/></Button>
+              <Button x:Name="MoreButton" Style="{StaticResource IconButtonStyle}"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE712;" FontSize="16"/>
                 <Button.Flyout><MenuFlyout>
-                  <MenuFlyoutItem x:Name="DetailsMenu" Click="OnDetails"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
-                  <MenuFlyoutItem x:Name="ExportMenu" Click="OnExport"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74E;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
-                  <MenuFlyoutItem x:Name="OpenFolderMenu" Click="OnOpenFolder"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE838;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="DetailsMenu" Click="OnDetails"><MenuFlyoutItem.Icon><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE946;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="ExportMenu" Click="OnExport"><MenuFlyoutItem.Icon><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE74E;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="OpenFolderMenu" Click="OnOpenFolder"><MenuFlyoutItem.Icon><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE838;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                   <MenuFlyoutSeparator/>
-                  <MenuFlyoutItem x:Name="RetrySessionConnectionMenu" Click="OnRetrySessionAction"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
-                  <MenuFlyoutItem x:Name="DisconnectMenu" Click="OnConnect"><MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8D8;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="RetrySessionConnectionMenu" Click="OnRetrySessionAction"><MenuFlyoutItem.Icon><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE72C;"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
+                  <MenuFlyoutItem x:Name="DisconnectMenu" Click="OnConnect"><MenuFlyoutItem.Icon><BitmapIcon UriSource="Assets/Icons/Disconnect.png" ShowAsMonochrome="True" Width="16" Height="16"/></MenuFlyoutItem.Icon></MenuFlyoutItem>
                 </MenuFlyout></Button.Flyout>
               </Button>
             </StackPanel>
           </Grid>
           <Grid Grid.Row="2">
             <StackPanel x:Name="WelcomePanel" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="400" Margin="32" Spacing="12">
-              <FontIcon Glyph="&#xE8A5;" FontSize="36" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" AutomationProperties.AccessibilityView="Raw"/>
-              <TextBlock x:Name="WelcomeTitle" Style="{ThemeResource SubtitleTextBlockStyle}" TextAlignment="Center" TextWrapping="Wrap"/>
+              <FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE8A5;" FontSize="32" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,0,4" AutomationProperties.AccessibilityView="Raw"/>
+              <TextBlock x:Name="WelcomeTitle" AutomationProperties.HeadingLevel="1" Style="{ThemeResource SubtitleTextBlockStyle}" TextAlignment="Center" TextWrapping="Wrap"/>
               <TextBlock x:Name="WelcomeHint" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextAlignment="Center" TextWrapping="Wrap"/>
               <Button x:Name="SetupCodexButton" HorizontalAlignment="Center" Visibility="Collapsed" Click="OnSetupCodex"/>
             </StackPanel>
@@ -95,10 +96,11 @@
               <Grid x:Name="FindPanel" Visibility="Collapsed" Margin="24,0,24,12" ColumnSpacing="8">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBox x:Name="TranscriptSearch" TextChanged="OnTranscriptSearchChanged" MinHeight="40"/>
-                <Button x:Name="CloseFindButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnCloseFind"><FontIcon Glyph="&#xE711;" FontSize="14"/></Button>
+                <Button x:Name="CloseFindButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnCloseFind"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE711;" FontSize="16"/></Button>
               </Grid>
               <Grid Grid.Row="1">
                 <ListView x:Name="MessageList" Background="Transparent" SelectionMode="None" IsItemClickEnabled="False" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
                   <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></ListView.ItemContainerStyle>
                   <ListView.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></ListView.ItemTemplate>
                 </ListView>
@@ -117,9 +119,14 @@
                   <TextBlock x:Name="ArchiveExplanation" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed"/>
                   <Grid x:Name="SessionSetupActions" Grid.Row="1" ColumnSpacing="12">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid x:Name="SessionServerChecking" ColumnSpacing="8" Visibility="Collapsed" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <ProgressRing x:Name="SessionServerCheckingRing" Width="16" Height="16" IsActive="False" VerticalAlignment="Center" AutomationProperties.AccessibilityView="Raw"/>
+                      <TextBlock x:Name="SessionServerCheckingText" Grid.Column="1" FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </Grid>
                     <Grid x:Name="SessionConnectionUnavailable" ColumnSpacing="8" Visibility="Collapsed" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                      <FontIcon Glyph="&#xE7BA;" FontSize="16" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Top" Margin="0,2,0,0" AutomationProperties.AccessibilityView="Raw"/>
+                      <FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE7BA;" FontSize="16" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Top" Margin="0,2,0,0" AutomationProperties.AccessibilityView="Raw"/>
                       <TextBlock x:Name="SessionConnectionReason" Grid.Column="1" FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </Grid>
                     <Button x:Name="ResumeButton" Grid.Column="1" Click="OnResume" MinHeight="40" VerticalAlignment="Bottom"><TextBlock x:Name="ResumeLabel" TextWrapping="Wrap" MaxWidth="170"/></Button>
@@ -138,11 +145,6 @@
         </Grid>
       </Border>
     </SplitView>
-    <Grid Grid.Row="2" Margin="20,0" ColumnSpacing="12">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <TextBlock x:Name="ConnectionStatus" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-      <TextBlock x:Name="ActivityNote" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-      <TextBlock x:Name="SessionCount" Grid.Column="2" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.LiveSetting="Polite"/>
-    </Grid>
+    <TextBlock x:Name="SessionCount" Grid.Row="2" Margin="20,0" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
   </Grid>
 </Window>

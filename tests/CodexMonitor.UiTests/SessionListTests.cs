@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Text.Json;
 using CodexMonitor.Core;
+using CodexMonitor.App;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.VisualStudio.TestTools.UnitTesting.AppContainer;
 
@@ -44,7 +45,7 @@ public sealed class SessionListTests
     }
 
     [UITestMethod]
-    public async Task OnlyActualSessionAdditionsAndDeletionsAnimateAndNeverResetExistingRows()
+    public async Task AdditionsAndDeletionsStayLocalWithoutReanimatingExistingRows()
     {
         var window = TestApp.ReviewWindow;
         await window.SetReviewAsync(1180, 800, "Light", "zh-CN");
@@ -57,18 +58,61 @@ public sealed class SessionListTests
             var added = new SessionInfo { Id = "new", Title = "New session", UpdatedAt = DateTimeOffset.Now };
             window.ApplySessionReviewSnapshot(added, original[1].Session, original[0].Session);
             CollectionAssert.AreEqual(new[] { NotifyCollectionChangedAction.Add }, changes);
-            Assert.IsGreaterThan(0, window.ReviewListTransitions);
+            Assert.AreEqual(0, window.ReviewListTransitions);
+            Assert.IsTrue(window.ReviewSessionRows[0].HasUnread);
             Assert.AreEqual("new", window.ReviewSessionRows[0].Session.Id);
             Assert.AreSame(original[0], window.ReviewSessionRows[1]); Assert.AreSame(original[1], window.ReviewSessionRows[2]);
             changes.Clear();
             window.ApplySessionReviewSnapshot(added, original[0].Session);
             CollectionAssert.AreEqual(new[] { NotifyCollectionChangedAction.Remove }, changes);
-            Assert.IsGreaterThan(0, window.ReviewListTransitions);
+            Assert.AreEqual(0, window.ReviewListTransitions);
             Assert.AreSame(source, window.ReviewSessionSource); Assert.AreSame(original[0], window.ReviewSessionRows[1]);
         }
         finally { window.ReviewSessionRows.CollectionChanged -= onChange; }
     }
 
+    [UITestMethod]
+    public async Task NewSessionsPreserveTheVisibleAnchorAndSelectionInAScrolledList()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var sessions = Enumerable.Range(0, 40).Select(i => new SessionInfo { Id = "row" + i, Title = "Session " + i, State = SessionState.Completed }).ToArray();
+        window.ApplySessionReviewSnapshot(sessions); window.ReadReviewSession("row18");
+        var selected = window.ReviewSelectedRow; var before = await window.SessionAnchorReviewAsync("row18", true);
+        window.ApplySessionReviewSnapshot([new SessionInfo { Id = "added", Title = "New session" }, .. sessions]);
+        await MainWindow.SettleAsync(); var after = await window.SessionAnchorReviewAsync("row18");
+        Assert.AreSame(selected, window.ReviewSelectedRow); Assert.AreEqual(before, after, 2d, "A new conversation must not move the row being read");
+        Assert.AreEqual(0, window.ReviewListTransitions);
+        TestContext.AddResultFile(await window.CaptureReviewAsync("session-new-anchor-dark"));
+    }
+    [UITestMethod]
+    public async Task TranscriptAndNestedActivityListsKeepTheirReadingPositionsAcrossUpdates()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var before = await window.TranscriptAnchorReviewAsync(false); var after = await window.TranscriptAnchorReviewAsync(true);
+        Assert.AreEqual(before, after, 2d, "An earlier message update must not move the transcript being read");
+        await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var activityBefore = await window.ActivityScrollReviewAsync(false); var activityAfter = await window.ActivityScrollReviewAsync(true);
+        Assert.IsGreaterThan(0d, activityBefore); Assert.AreEqual(activityBefore, activityAfter, 2d, "Streaming activity must keep its internal scroll position");
+    }
+    [UITestMethod]
+    public async Task NewRepliesDoNotStealAnActivityReaderAndTheEndStillFollowsNewCalls()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var reading = await window.NewReplyWhileReadingActivityReviewAsync();
+        Assert.IsTrue(reading.Paused); Assert.IsTrue(reading.SameList); Assert.AreEqual(reading.Before, reading.After, 2d);
+        await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        Assert.IsTrue(await window.ActivityAtEndFollowsNewItemsReviewAsync(), "A reader already at the end should see appended calls naturally");
+    }
+    [UITestMethod]
+    public async Task ExpandedOutputKeepsScrollAndKeyboardFocusWhenItsContentStreams()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var result = await window.ExpandedOutputUpdateReviewAsync();
+        Assert.IsGreaterThan(0d, result.Before); Assert.AreEqual(result.Before, result.After, 2d);
+        Assert.IsTrue(result.Expanded); Assert.IsTrue(result.Focused);
+        Assert.IsTrue(window.ReviewVisualElements<Microsoft.UI.Xaml.Controls.ScrollViewer>().All(s => s.IsVerticalScrollChainingEnabled));
+        TestContext.AddResultFile(await window.CaptureReviewAsync("streaming-output-reading-position"));
+    }
     [UITestMethod]
     [DataRow(SessionState.Active, true, false, true)]
     [DataRow(SessionState.Waiting, true, false, true)]

@@ -19,20 +19,23 @@ public sealed partial class MainWindow
 
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
+        foreach (var item in _reviewFontOverrides) item.Element.SetValue(item.Property, item.Value);
+        _reviewFontOverrides.Clear();
         if (_client is not null) { await _client.DisposeAsync(); _client = null; }
         _syncing = true;
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
         _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language };
-        Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _sessionConnectionFailures.Clear(); _connectionEndpoint = null;
-        _cliMissing = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe"; _checkResumeState = CheckResumeStateAsync;
+        _sessionAvailabilityCancellation?.Cancel(); _sessionServerCheckedAt.Clear();
+        Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _activityScrollOffsets.Clear(); _sessionConnectionFailures.Clear(); _connectionEndpoint = null;
+        _cliMissing = false; _readingActivityHistory = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe"; _checkResumeState = CheckResumeStateAsync;
         _text = new(language);
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");
         _selected = new SessionInfo { Id = "review-session", Title = "Review the transcript layout and keyboard interactions", Cwd = "D:\\Projects\\CodexMonitor", State = SessionState.Completed, CreatedAt = time, UpdatedAt = time, FileVersion = new(100, time.UtcDateTime) };
         _sessions = [_selected, new SessionInfo { Id = "child", Title = "Check localization and a longer session title", Cwd = "D:\\Projects\\CodexMonitor", ParentId = "review-session", State = SessionState.Completed, UpdatedAt = time, FileVersion = new(200, time.UtcDateTime) }];
         _snapshot = new(_selected, [new("u1", EntryKind.User, _text["ConnectionHelp"] + "\n\n" + _text["PrivacyNote"], time),
-            new("a1", EntryKind.Assistant, "## Transcript\n\n" + _text["ConnectionHelp"] + "\n\n```csharp\nvar text = \"你好 · مرحبا · שלום\";\nConsole.WriteLine(text);\n```\n\n" + _text["ActivityNote"], time)]);
+            new("a1", EntryKind.Assistant, "## Transcript\n\n" + _text["ConnectionHelp"] + "\n\n```csharp\nvar text = \"你好 · مرحبا · שלום\";\nConsole.WriteLine(text);\n```\n\n" + _text["PrivacyNote"], time)]);
         WelcomePanel.Visibility = Visibility.Collapsed; Conversation.Visibility = Visibility.Visible;
         _ready = true; Localize();
         var scale = Root.XamlRoot.RasterizationScale;
@@ -59,7 +62,7 @@ public sealed partial class MainWindow
         {
             ["title"] = Bounds(SessionTitle),
             ["find"] = Bounds(FindButton), ["more"] = Bounds(MoreButton), ["messages"] = Bounds(MessageList),
-            ["footer"] = Bounds(SessionFooter), ["status"] = Bounds(ConnectionStatus)
+            ["footer"] = Bounds(SessionFooter), ["count"] = Bounds(SessionCount)
         };
         if (Composer.Visibility == Visibility.Visible) { bounds["composer"] = Bounds(Composer); bounds["send"] = Bounds(SendButton); }
         if (SessionSetupActions.Visibility == Visibility.Visible)
@@ -68,6 +71,7 @@ public sealed partial class MainWindow
             if (ResumeButton.Visibility == Visibility.Visible) bounds["resume"] = Bounds(ResumeButton);
             if (SessionConnectButton.Visibility == Visibility.Visible) bounds["sessionConnect"] = Bounds(SessionConnectButton);
             if (SessionConnectionUnavailable.Visibility == Visibility.Visible) bounds["connectionUnavailable"] = Bounds(SessionConnectionUnavailable);
+            if (SessionServerChecking.Visibility == Visibility.Visible) bounds["serverChecking"] = Bounds(SessionServerChecking);
         }
         return bounds;
         Windows.Foundation.Rect Bounds(FrameworkElement element) => element.TransformToVisual(Root).TransformBounds(new(0, 0, element.ActualWidth, element.ActualHeight));
@@ -103,6 +107,10 @@ public sealed partial class MainWindow
     internal bool ReviewConnectionHelpVisible => SessionSetupHelp.Visibility == Visibility.Visible && ConnectExplanation.Visibility == Visibility.Visible;
     internal bool ReviewCanResume => ResumeButton.IsEnabled;
     internal bool ReviewResumeButtonVisible => ReviewSetupVisible && ResumeButton.Visibility == Visibility.Visible;
+    internal bool ReviewServerChecking => ReviewSetupVisible && SessionServerChecking.Visibility == Visibility.Visible && SessionServerCheckingRing.IsActive;
+    internal Task CheckSessionAvailabilityReviewAsync(bool force = false) => CheckSessionAvailabilityAsync(force);
+    internal Task RetrySessionActionReviewAsync() => RetrySessionActionAsync();
+    internal void ChangeSelectedSessionReview(string id) { _sessionAvailabilityCancellation?.Cancel(); _selected = _selected! with { Id = id }; UpdateChrome(); }
     internal void SetSessionStateReview(SessionState state, bool live = false)
     {
         _selected = _selected! with { State = state, IsLive = live };
@@ -121,6 +129,109 @@ public sealed partial class MainWindow
     internal void ConfigureSessionConnectionReview(ISessionServerLocator locator, Func<SessionServerMatch, CancellationToken, Task<CodexClient>> open)
     { _sessionServerLocator = locator; _openSessionServer = open; }
     internal Task ConnectSessionReviewAsync() => ConnectSessionAsync();
+    internal async Task ShowStructuredActivityReviewAsync(string json, string? method = null)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var activity = method is null ? CodexClient.ParseItem(doc.RootElement, lifecycle: ToolActivityState.Completed) : TranscriptEvents.Parse(method, doc.RootElement)!;
+        _snapshot = new(_selected!, [new("public-summary", EntryKind.Reasoning, "先核对运行状态，再检查操作结果。", DateTimeOffset.Now), activity]);
+        _expandedActivities.Add(activity.Id); _expandedActivities.Add(activity.Id + ":edit:0"); RenderMessages(true); await SettleAsync();
+    }
+    internal IReadOnlyList<T> ReviewVisualElements<T>() where T : DependencyObject => Descendants(Root).OfType<T>().ToArray();
+    private readonly List<(DependencyObject Element, DependencyProperty Property, object Value)> _reviewFontOverrides = [];
+    internal async Task ScaleReviewTextAsync(double factor)
+    {
+        // Layout stress equivalent, without changing the user's system-wide Text size setting.
+        bool WithinIcon(DependencyObject element)
+        {
+            for (var parent = element; parent is not null; parent = VisualTreeHelper.GetParent(parent)) if (parent is IconElement) return true;
+            return false;
+        }
+        var values = Descendants(Root).Where(element => !WithinIcon(element)).Select(element => element switch
+        {
+            TextBlock t => (Element: element, Property: TextBlock.FontSizeProperty, Size: t.FontSize),
+            RichTextBlock t => (Element: element, Property: RichTextBlock.FontSizeProperty, Size: t.FontSize),
+            Control c => (Element: element, Property: Control.FontSizeProperty, Size: c.FontSize),
+            _ => (Element: element, Property: (DependencyProperty?)null, Size: 0d)
+        }).Where(item => item.Property is not null).ToArray();
+        foreach (var item in values) { _reviewFontOverrides.Add((item.Element, item.Property!, item.Size)); item.Element.SetValue(item.Property!, item.Size * factor); }
+        await SettleAsync();
+    }
+    internal void ToggleFindReview(bool open) => ToggleFind(open);
+    internal bool ReviewFindHasFocus => AccessibilitySupport.ContainsFocus(FindButton);
+    internal bool ReviewSearchHasFocus => AccessibilitySupport.ContainsFocus(TranscriptSearch);
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        { var child = VisualTreeHelper.GetChild(parent, i); yield return child; foreach (var item in Descendants(child)) yield return item; }
+    }
+    internal async Task<double> SessionAnchorReviewAsync(string id, bool scroll = false)
+    {
+        if (scroll) { SessionList.ScrollIntoView(_sessionRows[id], ScrollIntoViewAlignment.Leading); await SettleAsync(); }
+        var container = (FrameworkElement?)SessionList.ContainerFromItem(_sessionRows[id]);
+        return container?.TransformToVisual(Root).TransformPoint(new(0, 0)).Y ?? throw new InvalidOperationException("Anchor is not realized");
+    }
+    internal async Task<double> TranscriptAnchorReviewAsync(bool update)
+    {
+        if (!update)
+        {
+            _snapshot = new(_selected!, Enumerable.Range(0, 40).Select(i => new TranscriptEntry("message-" + i, EntryKind.Assistant, "Message " + i + "\n\nA readable paragraph.", DateTimeOffset.Now)).ToArray());
+            _following = false; RenderMessages(true); await SettleAsync(); MessageList.ScrollIntoView(_messages[18], ScrollIntoViewAlignment.Leading); await SettleAsync(); _following = false;
+        }
+        else
+        {
+            _snapshot = _snapshot! with { Entries = _snapshot.Entries.Select(e => e.Id == "message-2" ? e with { Text = e.Text + string.Concat(Enumerable.Repeat("\n\nEarlier content expanded.", 10)) } : e).Append(new("message-40", EntryKind.Assistant, "New response", DateTimeOffset.Now)).ToArray() };
+            RenderMessages(); await SettleAsync();
+        }
+        var row = _messages.First(e => e.Entry.Id == "message-18");
+        var container = (FrameworkElement?)MessageList.ContainerFromItem(row);
+        return container?.TransformToVisual(Root).TransformPoint(new(0, 0)).Y ?? throw new InvalidOperationException("Transcript anchor was lost");
+    }
+    internal async Task<double> ActivityScrollReviewAsync(bool update)
+    {
+        if (!update)
+        {
+            _snapshot = new(_selected!, Enumerable.Range(0, 100).Select(i => new TranscriptEntry("activity-" + i, EntryKind.Tool, "echo " + i, DateTimeOffset.Now, Tool: new("shell", "echo " + i, "OK", ToolActivityState.Completed))).ToArray());
+            _following = false; RenderMessages(true); await SettleAsync();
+        }
+        else { _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("activity-new", EntryKind.Tool, "echo new", DateTimeOffset.Now, Tool: new("shell", "echo new", "OK", ToolActivityState.Completed))).ToArray() }; RenderMessages(); await SettleAsync(); }
+        var group = FindVisual<ListView>(MessageList) ?? throw new InvalidOperationException("Activity list not realized");
+        var scroll = FindVisual<ScrollViewer>(group)!;
+        if (!update) { scroll.ChangeView(null, 700, null, true); await SettleAsync(); }
+        return scroll.VerticalOffset;
+    }
+    internal async Task<(double Before, double After, bool Paused, bool SameList)> NewReplyWhileReadingActivityReviewAsync()
+    {
+        var before = await ActivityScrollReviewAsync(false);
+        var group = FindVisual<ListView>(MessageList)!; _following = true;
+        _messages[0].HistoryChanged?.Invoke(true);
+        _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("reply-new", EntryKind.Assistant, "A new reply arrived.", DateTimeOffset.Now)).ToArray() };
+        RenderMessages(); await SettleAsync();
+        var current = FindVisual<ListView>(MessageList)!;
+        return (before, FindVisual<ScrollViewer>(current)!.VerticalOffset, !_following && LatestButton.Visibility == Visibility.Visible, ReferenceEquals(group, current));
+    }
+    internal async Task<bool> ActivityAtEndFollowsNewItemsReviewAsync()
+    {
+        await ActivityScrollReviewAsync(false); _following = true;
+        var group = FindVisual<ListView>(MessageList)!; var scroll = FindVisual<ScrollViewer>(group)!;
+        scroll.ChangeView(null, scroll.ScrollableHeight, null, true); await SettleAsync();
+        await ActivityScrollReviewAsync(true); await SettleAsync();
+        return scroll.ScrollableHeight - scroll.VerticalOffset < 2;
+    }
+    internal bool ReviewNativeHighContrast => _themeSettings.HighContrast;
+    internal async Task<(double Before, double After, bool Expanded, bool Focused)> ExpandedOutputUpdateReviewAsync()
+    {
+        var entry = new TranscriptEntry("stream-output", EntryKind.Tool, "echo output", DateTimeOffset.Now,
+            Tool: new("shell", "echo output", string.Join("\n", Enumerable.Range(0, 120).Select(i => "Output line " + i)), ToolActivityState.Running));
+        _snapshot = new(_selected!, [entry]); _expandedActivities.Add(entry.Id); _following = false;
+        RenderMessages(true); await SettleAsync();
+        ScrollViewer Output() => Descendants(MessageList).OfType<ScrollViewer>().First(s => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(s) == _text["ToolOutput"]);
+        var scroll = Output(); scroll.ChangeView(null, 180, null, true); await SettleAsync(); var before = scroll.VerticalOffset;
+        Descendants(MessageList).OfType<ActivityDisclosure>().First().Focus(FocusState.Keyboard);
+        _snapshot = new(_selected!, [entry with { Tool = entry.Tool! with { Output = entry.Tool.Output + "\nMore output arrived." } }]);
+        RenderMessages(); await SettleAsync();
+        var disclosure = Descendants(MessageList).OfType<ActivityDisclosure>().First();
+        return (before, Output().VerticalOffset, disclosure.IsExpanded, AccessibilitySupport.ContainsFocus(disclosure));
+    }
     internal async Task ShowActivityReviewAsync(bool expand = false)
     {
         var time = DateTimeOffset.Parse("2026-11-03T08:00:00Z");

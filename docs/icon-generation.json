@@ -1,0 +1,61 @@
+{
+  "mode": "Built-in image_gen",
+  "date": "2026-11-03",
+  "postprocessing": "User-authorized Python alpha cleanup, component filtering, keyline and stroke normalization; originals preserved.",
+  "icons": [
+    {
+      "name": "McpTool",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome in-app Fluent Design toolbar icon, representing MCP (Model Context Protocol) external tool connections, for a Windows 11 WinUI 3 transcript viewer. Create ONE square 1024x1024 transparent PNG source icon, no contact sheet. Subject: a very simple, unmistakable connection between two interlocking rounded open links, suggesting a tool connected to an agent, balanced symmetric construction. Style: Microsoft Fluent System Icons Regular family discipline: flat single-color solid black monoline, consistent strokes equivalent to 1.5 units on a 24x24 logical grid, rounded caps and rounded joins, crisp geometric contour, no fine interior decoration. Composition: optical center aligned precisely to canvas center; drawing fits within a 20x20 keyline inside a 24x24 logical canvas, with consistent 2-unit safe margin. Legible at 16 and 20 physical pixels, open negative space and a simple silhouette. True transparent background and clean anti-aliased alpha, including open interiors. No text, letters, border, tile, gradient, shadow, 3D lighting, badge, decorative dots, color, watermark, multiple variants, or other icons. This source will be rendered through WinUI BitmapIcon as a theme-tinted monochrome mask, so use pure opaque black strokes and true transparent background.",
+      "master": "design/icon-sources/McpTool.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/McpTool.png"
+    },
+    {
+      "name": "CustomTool",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular in-app icon for WinUI 3. Create ONE square 1024x1024 transparent PNG, one icon only. A pair of simple open code angle brackets with one small central connector dot; a custom client tool, no letters. Match Microsoft Fluent System Icons Regular discipline: pure opaque WHITE monoline with uniform 1.5-unit stroke on a 24x24 logical grid, round caps and joins, mathematically simple geometry, optical center at the exact canvas center. Use the central 20x20 keyline with 2 units clear padding. Legible at 16 and 20 pixels, no tiny interior detail. True transparent background and interiors, clean anti-aliased alpha. The app tints this mask dynamically for light, dark and contrast themes. No text, letters, dark background, tile, gradient, shadow, 3D, badge, decoration, watermark, or contact sheet. Consistent stroke weight and visual size across this icon family.",
+      "master": "design/icon-sources/CustomTool.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/CustomTool.png"
+    },
+    {
+      "name": "AgentCollaboration",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular in-app icon for WinUI 3. Create ONE square 1024x1024 transparent PNG, one icon only. Three small rounded square nodes connected by two simple short branch lines: one centered parent node above two children, indicating agents coordinating. Match Microsoft Fluent System Icons Regular discipline: pure opaque WHITE monoline with uniform 1.5-unit stroke on a 24x24 logical grid, round caps and joins, mathematically simple geometry, optical center at the exact canvas center. Use the central 20x20 keyline with 2 units clear padding. Legible at 16 and 20 pixels, no tiny interior detail. True transparent background and interiors, clean anti-aliased alpha. The app tints this mask dynamically for light, dark and contrast themes. No text, letters, dark background, tile, gradient, shadow, 3D, badge, decoration, watermark, or contact sheet. Consistent stroke weight and visual size across this icon family.",
+      "master": "design/icon-sources/AgentCollaboration.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/AgentCollaboration.png"
+    },
+    {
+      "name": "ContextCompaction",
+      "prompt": "Use case: logo-brand. ONE production Fluent Regular icon for context compaction. Square 1024x1024, truly transparent. A centered vertical composition: a small DOWN arrow at the top, three short horizontal document lines stacked in the middle, and a small UP arrow at the bottom, arrows both point toward the middle lines. Overall drawing nearly square, width 16 and height 20 on a 24-unit grid. Uniform 1.5-unit strokes, round caps and joins, optically centered. Pure opaque WHITE silhouette only, no haze or texture, no background, no gradient, no shadows, no letters, no text, no other objects. Very simple geometry, readable at 16 pixels.",
+      "master": "design/icon-sources/ContextCompaction.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/ContextCompaction.png"
+    },
+    {
+      "name": "LifecycleHook",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular in-app icon for WinUI 3. Create ONE square 1024x1024 transparent PNG, one icon only. A single smooth hooked arrow entering a small rounded square event node, representing a lifecycle hook or trigger, not a fishing hook. Match Microsoft Fluent System Icons Regular discipline: pure opaque WHITE monoline with uniform 1.5-unit stroke on a 24x24 logical grid, round caps and joins, mathematically simple geometry, optical center at the exact canvas center. Use the central 20x20 keyline with 2 units clear padding. Legible at 16 and 20 pixels, no tiny interior detail. True transparent background and interiors, clean anti-aliased alpha. The app tints this mask dynamically for light, dark and contrast themes. No text, letters, dark background, tile, gradient, shadow, 3D, badge, decoration, watermark, or contact sheet. Consistent stroke weight and visual size across this icon family.",
+      "master": "design/icon-sources/LifecycleHook.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/LifecycleHook.png"
+    },
+    {
+      "name": "ImageGeneration",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular in-app icon for WinUI 3. Create ONE square 1024x1024 transparent PNG, one icon only. A minimal rounded rectangle image frame with one simple mountain line and a small plus sign at its upper right, indicating creation of an image. No decorative sparkle. Match Microsoft Fluent System Icons Regular discipline: pure opaque WHITE monoline with uniform 1.5-unit stroke on a 24x24 logical grid, round caps and joins, mathematically simple geometry, optical center at the exact canvas center. Use the central 20x20 keyline with 2 units clear padding. Legible at 16 and 20 pixels, no tiny interior detail. True transparent background and interiors, clean anti-aliased alpha. The app tints this mask dynamically for light, dark and contrast themes. No text, letters, dark background, tile, gradient, shadow, 3D, badge, decoration, watermark, or contact sheet. Consistent stroke weight and visual size across this icon family.",
+      "master": "design/icon-sources/ImageGeneration.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/ImageGeneration.png"
+    },
+    {
+      "name": "FindInPage",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular in-app icon for WinUI 3. Create ONE square 1024x1024 transparent PNG, one icon only. A simple page outline with a small magnifying glass at the lower right, indicating finding text inside a document. No lines of text. Match Microsoft Fluent System Icons Regular discipline: pure opaque WHITE monoline with uniform 1.5-unit stroke on a 24x24 logical grid, round caps and joins, mathematically simple geometry, optical center at the exact canvas center. Use the central 20x20 keyline with 2 units clear padding. Legible at 16 and 20 pixels, no tiny interior detail. True transparent background and interiors, clean anti-aliased alpha. The app tints this mask dynamically for light, dark and contrast themes. No text, letters, dark background, tile, gradient, shadow, 3D, badge, decoration, watermark, or contact sheet. Consistent stroke weight and visual size across this icon family.",
+      "master": "design/icon-sources/FindInPage.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/FindInPage.png"
+    },
+    {
+      "name": "Disconnect",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular 16-DIP WinUI 3 icon. Create ONE square 1024x1024 transparent PNG icon only. Two simple disconnected cable connector ends with a short open gap between them, showing an app disconnecting from a server. Symmetric and very minimal. Pure WHITE monoline, Microsoft Fluent System Icons Regular geometry, uniform 1.5-unit stroke on 24x24 logical grid, round caps and joins. Optical center exact canvas center, 20x20 keyline with 2-unit safe margins. Legible at 16 pixels, minimal strokes and open negative space. True transparent background and interior; anti-aliased alpha. App uses theme-tinted BitmapIcon. No text, letters, tile, solid background, gradient, shadow, 3D, watermark, decoration, or contact sheet.",
+      "master": "design/icon-sources/Disconnect.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/Disconnect.png"
+    },
+    {
+      "name": "TokenUsage",
+      "prompt": "Use case: logo-brand. Asset type: production monochrome Fluent Regular 16-DIP WinUI 3 icon. Create ONE square 1024x1024 transparent PNG icon only. A small simple stack of three rounded token discs beside two short ascending usage bars. A compact clear silhouette representing consumed tokens or usage, not a money/currency symbol. Pure WHITE monoline, Microsoft Fluent System Icons Regular geometry, uniform 1.5-unit stroke on 24x24 logical grid, round caps and joins. Optical center exact canvas center, 20x20 keyline with 2-unit safe margins. Legible at 16 pixels, minimal strokes and open negative space. True transparent background and interior; anti-aliased alpha. App uses theme-tinted BitmapIcon. No text, letters, tile, solid background, gradient, shadow, 3D, watermark, decoration, or contact sheet.",
+      "master": "design/icon-sources/TokenUsage.png",
+      "runtime": "src/CodexMonitor.App/Assets/Icons/TokenUsage.png"
+    }
+  ]
+}

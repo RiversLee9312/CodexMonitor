@@ -8,6 +8,8 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using System.Text.RegularExpressions;
 using System.ComponentModel;
+using System.Collections.ObjectModel;
+using Microsoft.UI.Xaml.Input;
 
 namespace CodexMonitor.App;
 
@@ -63,26 +65,36 @@ public sealed class SessionRow(SessionInfo session, LocalizationService text, bo
     }
     public override string ToString() => AccessibleName;
 }
-public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false)
+public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null) : INotifyPropertyChanged
 {
-    public TranscriptEntry Entry { get; } = entry;
-    public LocalizationService Text { get; } = text;
-    public IReadOnlyList<TranscriptEntry> Activities { get; } = activities ?? [entry];
+    public TranscriptEntry Entry { get; private set; } = entry;
+    public LocalizationService Text { get; private set; } = text;
+    public IReadOnlyList<TranscriptEntry> Activities { get; private set; } = activities ?? [entry];
     public HashSet<string> Expanded { get; } = expanded ?? [];
-    public bool IsLive { get; } = live;
-    public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning;
-    public string ActivityTitle { get { var count = Activities.Count(e => e.Kind == EntryKind.Tool); return count > 0 ? Text.Format("ToolActivities", Text.Number(count)) : Text["Reasoning"]; } }
+    public bool IsLive { get; private set; } = live;
+    public Dictionary<string, double> ScrollOffsets { get; } = scrollOffsets ?? [];
+    public Action<bool>? HistoryChanged { get; private set; } = historyChanged;
+    public Func<bool>? CanFollow { get; private set; } = canFollow;
+    public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning or EntryKind.Event;
+    public string ActivityTitle => Text.Format("Activities", Text.Number(Activities.Count));
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
-    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
+    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Tool is { } tool ?
+        (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
+        { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
+        Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public void Update(EntryRow next)
+    { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; PropertyChanged?.Invoke(this, new(null)); }
     public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities);
-    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false)
+    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null)
     {
         var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
-        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded, live)); tools.Clear(); } }
+        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow)); tools.Clear(); } }
         foreach (var item in entries)
         {
-            if (item.Kind is EntryKind.Tool or EntryKind.Reasoning)
+            if (item.Kind == EntryKind.Reasoning && string.IsNullOrWhiteSpace(item.Text)) continue;
+            if (item.Kind is EntryKind.Tool or EntryKind.Reasoning or EntryKind.Event)
             {
                 if (item.Tool is { } tool && tool.CategoryKey == "ToolFileChanges")
                 {
@@ -91,7 +103,7 @@ public sealed class EntryRow(TranscriptEntry entry, LocalizationService text, IR
                 }
                 else tools.Add(item);
             }
-            else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live)); }
+            else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live, scrollOffsets: scrollOffsets, historyChanged: historyChanged, canFollow: canFollow)); }
         }
         Flush(); return rows;
     }
@@ -102,7 +114,18 @@ public sealed class ActivityDisclosure : Button
 {
     public bool IsExpanded { get; private set; }
     public event Action? ExpansionChanged;
-    public ActivityDisclosure() => Click += (_, _) => SetExpanded(!IsExpanded);
+    public ActivityDisclosure()
+    {
+        UseSystemFocusVisuals = true;
+        Click += (_, _) => SetExpanded(!IsExpanded);
+        KeyDown += (_, e) =>
+        {
+            var expand = FlowDirection == FlowDirection.RightToLeft ? Windows.System.VirtualKey.Left : Windows.System.VirtualKey.Right;
+            var collapse = FlowDirection == FlowDirection.RightToLeft ? Windows.System.VirtualKey.Right : Windows.System.VirtualKey.Left;
+            if (e.Key == expand) { SetExpanded(true); e.Handled = true; }
+            else if (e.Key == collapse) { SetExpanded(false); e.Handled = true; }
+        };
+    }
     public void SetExpanded(bool expanded)
     {
         if (IsExpanded == expanded) return;
@@ -115,8 +138,8 @@ public sealed class ActivityDisclosure : Button
     private sealed class ActivityDisclosurePeer(ActivityDisclosure owner) : ButtonAutomationPeer(owner), IExpandCollapseProvider
     {
         public ExpandCollapseState ExpandCollapseState => owner.IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
-        public void Collapse() => owner.SetExpanded(false);
-        public void Expand() => owner.SetExpanded(true);
+        public void Collapse() { if (!owner.IsEnabled) throw new ElementNotEnabledException(); owner.SetExpanded(false); }
+        public void Expand() { if (!owner.IsEnabled) throw new ElementNotEnabledException(); owner.SetExpanded(true); }
         protected override object GetPatternCore(PatternInterface patternInterface) => patternInterface == PatternInterface.ExpandCollapse ? this : base.GetPatternCore(patternInterface);
     }
 }
@@ -125,7 +148,68 @@ public sealed class TranscriptCard : UserControl
 {
     public static readonly DependencyProperty RowProperty = DependencyProperty.Register(nameof(Row), typeof(EntryRow), typeof(TranscriptCard), new PropertyMetadata(null, Changed));
     public EntryRow? Row { get => (EntryRow?)GetValue(RowProperty); set => SetValue(RowProperty, value); }
-    private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((TranscriptCard)d).Render();
+    private EntryRow? _observed;
+    public TranscriptCard()
+    {
+        Loaded += (_, _) => { Observe(); RefreshContent(); AccessibilitySupport.NormalizeIconsAfterLayout(this); };
+        Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; };
+    }
+    private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    { var card = (TranscriptCard)d; card.Observe(); card.RefreshContent(); }
+    private void Observe()
+    {
+        if (ReferenceEquals(_observed, Row)) return;
+        if (_observed is not null) _observed.PropertyChanged -= RowUpdated;
+        _observed = Row;
+        if (_observed is not null) _observed.PropertyChanged += RowUpdated;
+    }
+    private void RowUpdated(object? sender, PropertyChangedEventArgs args) => RefreshContent();
+    private void RefreshContent()
+    {
+        if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ListView list } && list.ItemsSource is ObservableCollection<EntryRow> children &&
+            children.Count > 0 && children[0].Entry.Id == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
+        {
+            var scroll = ScrollViewerIn(list); var follow = next.CanFollow?.Invoke() == true && (scroll is null || scroll.ScrollableHeight - scroll.VerticalOffset < 24);
+            var incoming = next.Activities.Select(entry => new EntryRow(entry, next.Text, expanded: next.Expanded, live: next.IsLive, scrollOffsets: next.ScrollOffsets, historyChanged: next.HistoryChanged, canFollow: next.CanFollow)).ToArray();
+            var common = Math.Min(children.Count, incoming.Length);
+            for (int i = 0; i < common; i++) if (!children[i].Matches(incoming[i])) children[i].Update(incoming[i]);
+            while (children.Count > incoming.Length) children.RemoveAt(children.Count - 1);
+            for (int i = common; i < incoming.Length; i++) children.Add(incoming[i]);
+            if (follow && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); });
+            return;
+        }
+        var hadFocus = IsLoaded && AccessibilitySupport.ContainsFocus(this);
+        var focused = hadFocus ? FocusManager.GetFocusedElement(XamlRoot) as Control : null;
+        var focusId = focused is null ? "" : AutomationProperties.GetAutomationId(focused);
+        var focusName = focused is null ? "" : AutomationProperties.GetName(focused);
+        var positions = Content is DependencyObject previous ? VisualChildren(previous).OfType<ScrollViewer>()
+            .Select(scroll => (scroll.VerticalOffset, AtEnd: scroll.ScrollableHeight - scroll.VerticalOffset < 24)).ToArray() : [];
+        Render();
+        if (positions.Length > 0 || focused is not null)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!IsLoaded || Content is not FrameworkElement content) return;
+                content.UpdateLayout(); var children = VisualChildren(content).ToArray();
+                var scrolls = children.OfType<ScrollViewer>().ToArray();
+                for (int i = 0; i < Math.Min(positions.Length, scrolls.Length); i++)
+                    scrolls[i].ChangeView(null, positions[i].AtEnd && Row?.CanFollow?.Invoke() == true ? scrolls[i].ScrollableHeight : positions[i].VerticalOffset, null, true);
+                if (focused is not null)
+                {
+                    var target = children.OfType<Control>().FirstOrDefault(control => focusId.Length > 0 ? AutomationProperties.GetAutomationId(control) == focusId : control.GetType() == focused.GetType() && AutomationProperties.GetName(control) == focusName);
+                    target?.Focus(FocusState.Programmatic);
+                }
+            });
+    }
+    internal static void PreserveScroll(DependencyObject container, EntryRow row)
+    {
+        if (row.Activities.Count > 1 && ScrollViewerIn(container) is { ScrollableHeight: > 0 } scroll)
+            row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
+    }
+    internal static void ScrollGroupToEnd(DependencyObject container, EntryRow row)
+    {
+        if (row.Activities.Count > 1 && ScrollViewerIn(container) is { } scroll)
+        { scroll.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); }
+    }
     private void Render()
     {
         if (Row is not { } row) return;
@@ -144,7 +228,7 @@ public sealed class TranscriptCard : UserControl
         var time = new TextBlock { Text = row.Time, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
         time.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         Grid.SetColumn(time, 1); header.Children.Add(time);
-        var copy = new Button { Content = new FontIcon { Glyph = "\uE8C8", FontSize = 14 }, MinHeight = 32, MinWidth = 36, Padding = new Thickness(6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
+        var copy = new Button { Content = new FontIcon { IsTextScaleFactorEnabled = false, Glyph = "\uE8C8", FontSize = 16 }, MinHeight = 40, MinWidth = 40, Padding = new Thickness(6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
         ToolTipService.SetToolTip(copy, row.Text["Copy"]); AutomationProperties.SetName(copy, row.Text["Copy"]);
         copy.Click += (_, _) => { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(entry.Text); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); ToolTipService.SetToolTip(copy, row.Text["Copied"]); };
         Grid.SetColumn(copy, 2); header.Children.Add(copy);
@@ -172,17 +256,58 @@ public sealed class TranscriptCard : UserControl
         if (row.Activities.Count == 1) return ToolRow(row.Activities[0], row);
         // One inline disclosure per operation, without nested group cards or repeated role/time headers.
         var template = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:TranscriptCard Row='{Binding}'/></DataTemplate>");
-        var itemStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='36'/></Style>");
-        return new ListView { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        var itemStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='40'/></Style>");
+        var list = new ListView { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
-            ItemsSource = row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive)).ToArray() };
+            ItemContainerTransitions = [], ItemsSource = new ObservableCollection<EntryRow>(row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive, scrollOffsets: row.ScrollOffsets, historyChanged: row.HistoryChanged, canFollow: row.CanFollow))) };
+        ScrollViewer.SetIsVerticalScrollChainingEnabled(list, true);
+        var userScrolling = false;
+        list.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
+        list.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
+        list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => userScrolling = true), true);
+        var initialFollow = !row.ScrollOffsets.ContainsKey(row.Entry.Id) && row.CanFollow?.Invoke() == true;
+        var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
+        list.Loaded += (_, _) =>
+        {
+            var scroll = ScrollViewerIn(list); if (scroll is null) return;
+            var restoring = true;
+            scroll.ViewChanged += (_, args) =>
+            {
+                if (!restoring && !args.IsIntermediate && list.IsLoaded && scroll.ScrollableHeight > 0)
+                { row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset; if (userScrolling) row.HistoryChanged?.Invoke(scroll.ScrollableHeight - scroll.VerticalOffset > 24); }
+            };
+            EventHandler<object>? layout = null;
+            layout = (_, _) =>
+            {
+                if (!restoring || scroll.ScrollableHeight <= 0) return;
+                scroll.ChangeView(null, initialFollow ? scroll.ScrollableHeight : Math.Min(savedOffset, scroll.ScrollableHeight), null, true); restoring = false;
+                list.LayoutUpdated -= layout;
+            };
+            list.LayoutUpdated += layout;
+            list.Unloaded += (_, _) => list.LayoutUpdated -= layout;
+        };
+        return list;
+    }
+    private static ScrollViewer? ScrollViewerIn(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        { var child = VisualTreeHelper.GetChild(root, i); if (child is ScrollViewer scroll) return scroll; if (ScrollViewerIn(child) is { } nested) return nested; }
+        return null;
+    }
+    private static IEnumerable<DependencyObject> VisualChildren(DependencyObject root)
+    {
+        yield return root;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            foreach (var child in VisualChildren(VisualTreeHelper.GetChild(root, i))) yield return child;
     }
     private static FrameworkElement ToolRow(TranscriptEntry entry, EntryRow row)
     {
+        if (entry.Kind == EntryKind.Reasoning)
+            return new Border { Padding = new Thickness(10, 6, 10, 8), Child = Markdown(entry.Text) };
         var tool = entry.Tool;
+        if (tool is { State: ToolActivityState.Running } && !row.IsLive) tool = tool with { State = ToolActivityState.Unknown };
         if (tool?.WaitDurationMs is { } wait) return WaitRow(entry, tool, wait, row);
-        var reasoning = entry.Kind == EntryKind.Reasoning;
-        var label = reasoning ? row.Text["Reasoning"] : tool is null ? entry.Label ?? row.Text["Tool"] : tool.CategoryKey == "ToolDetails" ? tool.Name : row.Text[tool.CategoryKey];
+        var label = tool is null ? entry.Label ?? row.Text["Tool"] : tool.CategoryKey == "ToolDetails" ? tool.Name : row.Text[tool.CategoryKey];
         if (tool is { State: ToolActivityState.Completed or ToolActivityState.Running })
             label = row.Text[(tool.CategoryKey, tool.State) switch
             {
@@ -190,37 +315,23 @@ public sealed class TranscriptCard : UserControl
                 ("ToolCommand", ToolActivityState.Completed) => "ToolRan", ("ToolCommand", _) => "ToolExecuting",
                 ("ToolSearch", ToolActivityState.Completed) => "ToolSearched", ("ToolSearch", _) => "ToolSearching", _ => tool.CategoryKey
             }];
-        if (tool?.State == ToolActivityState.Failed) label = row.Text["ToolFailed"] + " · " + label;
-        var reasoningPreview = reasoning ? Regex.Replace(entry.Text, @"\s+", " ") : "";
-        var summary = tool?.Summary ?? reasoningPreview[..Math.Min(100, reasoningPreview.Length)];
+        if (tool?.State == ToolActivityState.Failed && tool.CategoryKey != "EventError") label = row.Text["ToolFailed"] + " · " + label;
+        var summary = tool?.Summary ?? "";
         var title = label + (summary.Length > 0 ? " " + summary : "");
         if (tool is { AddedLines: { } added, RemovedLines: { } removed }) title += " +" + row.Text.Number(added) + " −" + row.Text.Number(removed);
-        var categoryIcon = reasoning ? "\uE946" : tool?.CategoryKey switch { "ToolFileChanges" => "\uE70F", "ToolSearch" => "\uE721", "ToolCommand" => "\uE756", _ => "\uE8A5" };
-        return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, categoryIcon), row, () =>
+        return Expandable(entry.Id, ActivityHeader(title, tool?.State ?? ToolActivityState.Unknown, row.Text, tool?.DurationMs, tool?.CategoryKey), row, () =>
         {
+            if (tool is not null) return ActivityDetails.Render(tool, row.Text, row.HistoryChanged);
             var content = new StackPanel { Spacing = 12 };
-            if (tool is null) content.Children.Add(reasoning ? Markdown(entry.Text) : Code(entry.Text));
-            else
-            {
-                AddSection(row.Text[tool.CategoryKey == "ToolCommand" ? "ToolCommand" : tool.CategoryKey == "ToolFileChanges" ? "ToolFileChanges" : "ToolParameters"], tool.DecodedInput);
-                if (tool.Output is { Length: > 0 } output) AddSection(row.Text["ToolOutput"], output);
-            }
-            if (tool is null) content.Children.Add(CopyButton(entry.Text));
+            content.Children.Add(Code(entry.Text));
+            content.Children.Add(CopyButton(entry.Text));
             return content;
             Button CopyButton(string value)
             {
-                var copy = new Button { Content = new FontIcon { Glyph = "\uE8C8", FontSize = 13 }, HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 32, MinWidth = 32, Padding = new Thickness(6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
+                var copy = new Button { Content = new FontIcon { IsTextScaleFactorEnabled = false, Glyph = "\uE8C8", FontSize = 16 }, HorizontalAlignment = HorizontalAlignment.Right, MinHeight = 40, MinWidth = 40, Padding = new Thickness(6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
                 AutomationProperties.SetName(copy, row.Text["Copy"]); ToolTipService.SetToolTip(copy, row.Text["Copy"]);
                 copy.Click += (_, _) => { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(value); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); };
                 return copy;
-            }
-            void AddSection(string heading, string value)
-            {
-                var section = new Grid { ColumnSpacing = 8 };
-                section.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); section.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-                section.Children.Add(new TextBlock { Text = heading, FontSize = 12, VerticalAlignment = VerticalAlignment.Center });
-                var copy = CopyButton(value); Grid.SetColumn(copy, 1); section.Children.Add(copy); content.Children.Add(section);
-                content.Children.Add(new ScrollViewer { Content = Code(value), MaxHeight = 300, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
             }
         }, title);
     }
@@ -232,7 +343,7 @@ public sealed class TranscriptCard : UserControl
         var completed = tool.State == ToolActivityState.Completed;
         var title = completed ? text["ToolWaitCompleted"] + " · " + duration : waiting ? text["ToolWaiting"] + " · " + duration : text.Format("ToolWaitDuration", duration);
         if (tool.State == ToolActivityState.Failed) title = text["ToolFailed"] + " · " + title;
-        var header = (Grid)ActivityHeader(title, waiting ? ToolActivityState.Running : tool.State == ToolActivityState.Running ? ToolActivityState.Unknown : tool.State, text, categoryIcon: "\uE823");
+        var header = (Grid)ActivityHeader(title, waiting ? ToolActivityState.Running : tool.State == ToolActivityState.Running ? ToolActivityState.Unknown : tool.State, text, categoryKey: "ToolWaiting");
         if (waiting)
         {
             header.Children.RemoveAt(0);
@@ -243,29 +354,24 @@ public sealed class TranscriptCard : UserControl
         {
             var panel = new StackPanel { Spacing = 12 };
             panel.Children.Add(new TextBlock { Text = text["ToolWaitDurationLabel"] + " · " + duration, FontSize = 13, TextWrapping = TextWrapping.Wrap });
-            var details = new StackPanel { Spacing = 8 };
-            details.Children.Add(new TextBlock { Text = text["ToolParameters"], FontSize = 12 }); details.Children.Add(Code(tool.Input));
-            if (tool.Output is { Length: > 0 } output) { details.Children.Add(new TextBlock { Text = text["ToolOutput"], FontSize = 12 }); details.Children.Add(new ScrollViewer { Content = Code(output), MaxHeight = 240 }); }
-            var copy = new Button { Content = text["Copy"], HorizontalAlignment = HorizontalAlignment.Left };
-            copy.Click += (_, _) => { var data = new Windows.ApplicationModel.DataTransfer.DataPackage(); data.SetText(entry.Text); Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(data); }; details.Children.Add(copy);
-            panel.Children.Add(Expandable(entry.Id + ":details", new TextBlock { Text = text["ToolDetails"], FontSize = 13 }, row, () => details, text["ToolDetails"]));
+            panel.Children.Add(Expandable(entry.Id + ":details", new TextBlock { Text = text["ToolDetails"], FontSize = 13 }, row, () => ActivityDetails.Render(tool, text, row.HistoryChanged), text["ToolDetails"]));
             return panel;
         }, title);
     }
-    private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryIcon = null)
+    private static FrameworkElement ActivityHeader(string title, ToolActivityState state, LocalizationService text, long? durationMs = null, string? categoryKey = null)
     {
         var header = new Grid { ColumnSpacing = 10, HorizontalAlignment = HorizontalAlignment.Stretch };
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
-        var icon = new FontIcon { Glyph = state == ToolActivityState.Failed ? "\uE783" : categoryIcon ?? "\uE756", FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
-        icon.SetResourceReference(FontIcon.ForegroundProperty, state == ToolActivityState.Failed ? "SystemFillColorCriticalBrush" : state == ToolActivityState.Running ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
-        AutomationProperties.SetName(icon, text[state switch { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running => "ToolRunning", _ => "Tool" }]);
+        var icon = ActivityIcon.Create(categoryKey ?? "ToolDetails", state, text);
         header.Children.Add(icon);
         var label = new TextBlock { Text = title, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1, VerticalAlignment = VerticalAlignment.Center };
         label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         Grid.SetColumn(label, 1); header.Children.Add(label);
-        if (durationMs is { } duration)
+        var metadata = state == ToolActivityState.Running ? text["ToolRunning"] : "";
+        if (durationMs is { } duration) metadata += (metadata.Length > 0 ? " · " : "") + text.Format("ToolDuration", (duration / 1000d).ToString("0.#", text.Culture));
+        if (metadata.Length > 0)
         {
-            var elapsed = new TextBlock { Text = text.Format("ToolDuration", (duration / 1000d).ToString("0.#", text.Culture)), FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+            var elapsed = new TextBlock { Text = metadata, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
             elapsed.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush"); Grid.SetColumn(elapsed, 2); header.Children.Add(elapsed);
         }
         ToolTipService.SetToolTip(header, title); return header;
@@ -276,12 +382,15 @@ public sealed class TranscriptCard : UserControl
         var toggleContent = new Grid { ColumnSpacing = 12 };
         toggleContent.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); toggleContent.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         toggleContent.Children.Add(header);
-        var chevron = new FontIcon { Glyph = "\uE70D", FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
+        var chevron = new FontIcon { IsTextScaleFactorEnabled = false, Glyph = "\uE70D", FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
         AutomationProperties.SetAccessibilityView(chevron, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
         Grid.SetColumn(chevron, 1); toggleContent.Children.Add(chevron);
         var toggle = new ActivityDisclosure { Content = toggleContent, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            MinHeight = 36, Padding = new Thickness(10, 6, 10, 6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
+            MinHeight = 40, Padding = new Thickness(10, 6, 10, 6), Style = (Style)Application.Current.Resources["IconButtonStyle"] };
         AutomationProperties.SetName(toggle, name); AutomationProperties.SetAutomationId(toggle, "ActivityToggle-" + id);
+        AutomationProperties.SetHelpText(toggle, row.Text["ActivityDetailsHelp"]);
+        if (row.Entry.Tool is { } activity && (activity.State != ToolActivityState.Running || row.IsLive))
+            AutomationProperties.SetItemStatus(toggle, row.Text[activity.State switch { ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Failed => "ToolFailed", ToolActivityState.Running => "ToolRunning", _ => "Tool" }]);
         var content = new Border { Padding = new Thickness(12), Margin = new Thickness(0, 4, 0, 8), CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Visibility = Visibility.Collapsed };
         content.SetResourceReference(Border.BackgroundProperty, "ControlFillColorTertiaryBrush"); content.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
         Grid.SetRow(content, 1); grid.Children.Add(toggle); grid.Children.Add(content);
@@ -298,7 +407,7 @@ public sealed class TranscriptCard : UserControl
     private static FrameworkElement Code(string text)
     {
         var block = new TextBlock { Text = text, FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = 13,
-            IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FlowDirection = FlowDirection.LeftToRight, LineHeight = 20 };
+            IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FlowDirection = FlowDirection.LeftToRight };
         return block;
     }
     // A deliberately small native renderer: selectable prose, code fences, headings, links and inline emphasis.
@@ -310,7 +419,7 @@ public sealed class TranscriptCard : UserControl
         void Flush()
         {
             if (prose.Count == 0) return;
-            var block = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 14, LineHeight = 23 };
+            var block = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, FontSize = 14 };
             var paragraph = new Paragraph();
             var content = string.Join("\n", prose); prose.Clear();
             foreach (var line in content.Split('\n'))

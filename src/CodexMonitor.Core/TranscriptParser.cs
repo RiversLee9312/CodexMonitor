@@ -67,7 +67,10 @@ public sealed class TranscriptParser
                                 state = SessionState.Interrupted; turnId = null; break;
                             case "error":
                                 state = SessionState.Error;
-                                entries.Add(new(id, EntryKind.Event, payload.Str("message", payload.GetRawText()), time, "Error"));
+                                entries.Add(TranscriptEvents.Parse("error", payload, time)! with { Id = id });
+                                break;
+                            case "warning":
+                                entries.Add(TranscriptEvents.Parse("warning", payload, time)! with { Id = id });
                                 break;
                             case "token_count":
                                 var usage = payload.Field("info").Field("total_token_usage").Field("total_tokens");
@@ -83,7 +86,8 @@ public sealed class TranscriptParser
                         if (payload.Field("total_tokens").TryNumber(out var total)) tokens = total;
                         break;
                     case "compacted":
-                        entries.Add(new(id, EntryKind.Event, payload.Str("message", payload.GetRawText()), time, "compacted"));
+                        entries.Add(new(id, EntryKind.Event, payload.Str("message", payload.GetRawText()), time, "compacted",
+                            Tool: new("contextCompaction", payload.Str("message"), State: ToolActivityState.Completed, SummaryOverride: "", CategoryOverride: "ToolCompaction")));
                         break;
                     case "world_state": case "thread_settings": case "context_window":
                         break;
@@ -127,6 +131,7 @@ public sealed class TranscriptParser
             "function_call_output" or "custom_tool_call_output" => new(id, EntryKind.Tool, p.Field("output").TextValue(), timestamp, "Tool"),
             "reasoning" when p.Field("summary").Items().Any() => new(id, EntryKind.Reasoning, Content(p.Field("summary")), timestamp),
             "message" or "reasoning" => null,
+            "web_search_call" or "image_generation_call" => new(id, EntryKind.Tool, p.GetRawText(), timestamp, type, Tool: ToolActivity.FromItem(p)),
             _ => new(id, EntryKind.Event, p.GetRawText(), timestamp, type, p.GetRawText())
         };
     }
