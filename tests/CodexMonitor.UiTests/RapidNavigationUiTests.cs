@@ -4,6 +4,9 @@ using CodexMonitor.App;
 using CodexMonitor.Core;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.VisualStudio.TestTools.UnitTesting.AppContainer;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 
 namespace CodexMonitor.UiTests;
 
@@ -11,6 +14,25 @@ namespace CodexMonitor.UiTests;
 public sealed class RapidNavigationUiTests
 {
     public TestContext TestContext { get; set; } = null!;
+
+    [UITestMethod]
+    public async Task RecycledCardShowsChangesMadeWhileItWasUnloaded()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Light", "zh-CN");
+        var entry = new TranscriptEntry("recycled", EntryKind.Assistant, "Before update", default);
+        var text = new LocalizationService("zh-CN"); var row = new EntryRow(entry, text);
+        var card = new TranscriptCard { Row = row };
+        var root = (Grid)window.ReviewRoot;
+        try
+        {
+            root.Children.Add(card); await MainWindow.SettleAsync();
+            root.Children.Remove(card); await MainWindow.SettleAsync();
+            row.Update(new EntryRow(entry with { Text = "After update" }, text));
+            root.Children.Add(card); await MainWindow.SettleAsync();
+            Assert.IsTrue(window.ReviewVisualElements<RichTextBlock>().Any(block => block.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines).OfType<Run>().Any(run => run.Text == "After update")));
+        }
+        finally { root.Children.Remove(card); }
+    }
 
     [UITestMethod]
     public async Task NativeScrollPatternThenSelectionKeepsDispatcherResponsiveWithPromptSizedTitles()

@@ -191,7 +191,7 @@ public sealed partial class TranscriptCard : UserControl
     public TranscriptCard()
     {
         Loaded += (_, _) => { Observe(); if (!ReferenceEquals(_rendered, Row)) RefreshContent(); AccessibilitySupport.NormalizeIconsAfterLayout(this); };
-        Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; };
+        Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; _rendered = null; };
     }
     private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e)
     { var card = (TranscriptCard)d; card.Observe(); card.RefreshContent(); }
