@@ -20,9 +20,10 @@
           </Grid>
           <AutoSuggestBox x:Name="SessionSearch" Grid.Row="1" TextChanged="OnSessionSearchChanged" QueryIcon="Find" MinHeight="40"/>
           <Grid Grid.Row="2" ColumnSpacing="12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <ComboBox x:Name="SessionFilter" HorizontalAlignment="Stretch" SelectionChanged="OnFilterChanged" MinHeight="36"/>
-            <Button x:Name="RefreshButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE72C;" FontSize="16"/></Button>
+            <Button x:Name="DateFilterButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnSessionDates"><FontIcon x:Name="DateFilterGlyph" IsTextScaleFactorEnabled="False" Glyph="&#xE787;" FontSize="16"/></Button>
+            <Button x:Name="RefreshButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE72C;" FontSize="16"/></Button>
           </Grid>
           <Grid Grid.Row="3">
             <ListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
@@ -51,6 +52,7 @@
                 </DataTemplate>
               </ListView.ItemTemplate>
             </ListView>
+            <ProgressRing x:Name="SessionLoadingRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" IsHitTestVisible="False"/>
             <StackPanel x:Name="NoSessionsPanel" Visibility="Collapsed" VerticalAlignment="Center" Spacing="8" Margin="8">
               <TextBlock x:Name="NoSessionsTitle" TextWrapping="Wrap" FontWeight="SemiBold"/>
               <TextBlock x:Name="NoSessionsHint" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>

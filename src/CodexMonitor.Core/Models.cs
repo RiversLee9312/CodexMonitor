@@ -22,6 +22,7 @@ public sealed record SessionInfo
     public bool IsArchived { get; init; }
     public bool IsLive { get; init; }
     public TranscriptFileVersion? FileVersion { get; init; }
+    public string? ContentRevision { get; init; }
     public string FolderName => string.IsNullOrEmpty(Cwd) ? "" : Path.GetFileName(Cwd.TrimEnd('\\', '/'));
 }
 

@@ -87,11 +87,11 @@ public sealed partial class MainWindow : Window
         _reviewMode = reviewMode;
         _checkResumeState = CheckResumeStateAsync;
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
-        _text = new(_settings.Language); _store = new(_settings.CodexHome);
+        _text = new(_settings.Language); _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json"));
         InitializeComponent();
-        SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => _sessionAnchorInputVersion++), true);
+        SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) => { _sessionAnchorInputVersion++; if (e.GetCurrentPoint(SessionList).Properties.MouseWheelDelta < 0) ++_sessionPageIntent; }), true);
         SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => _sessionAnchorInputVersion++), true);
-        SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => _sessionAnchorInputVersion++), true);
+        SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { _sessionAnchorInputVersion++; if (e.Key is VirtualKey.PageDown or VirtualKey.End or VirtualKey.Down) ++_sessionPageIntent; }), true);
         _themeSettings = Microsoft.UI.System.ThemeSettings.CreateForWindowId(AppWindow.Id);
         _themeSettings.Changed += OnSystemThemeChanged;
         Root.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(Root);
@@ -114,13 +114,14 @@ public sealed partial class MainWindow : Window
         }), true);
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
         { if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
+        SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _timer = DispatcherQueue.CreateTimer(); _timer.Interval = TimeSpan.FromSeconds(3);
         _timer.Tick += async (_, _) => await RefreshAsync();
         Closed += async (_, _) =>
         {
-            _closing = true; _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel(); _sessionAvailabilityCancellation?.Cancel();
+            _closing = true; _sessionQueryCancellation?.Cancel(); _sessionReorderTimer?.Stop(); _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel(); _sessionAvailabilityCancellation?.Cancel();
             _themeSettings.Changed -= OnSystemThemeChanged;
             if (_client is not null) await _client.DisposeAsync();
         };
@@ -192,6 +193,7 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetAcceleratorKey(SettingsButton, "Ctrl+,"); AutomationProperties.SetAcceleratorKey(RefreshButton, "F5");
         AutomationProperties.SetAcceleratorKey(SendButton, "Ctrl+Enter");
         DetailsMenu.Text = _text["Details"]; ExportMenu.Text = _text["Export"]; OpenFolderMenu.Text = _text["OpenFolder"];
+        UpdateDateFilterChrome();
         Label(LatestButton, "JumpToLatest"); AutomationProperties.SetName(EarlierRing, _text["LoadingEarlier"]);
         Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessageInput"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
@@ -258,34 +260,27 @@ public sealed partial class MainWindow : Window
         if (!_ready || _closing || !await _refreshLock.WaitAsync(0)) return;
         try
         {
-            var local = await _store.ListAsync(_lifetime.Token);
-            if (_client is { IsConnected: true } client)
+            if (_sessionCatalog is null) SetSessionLoading(true);
+            var previousLocal = _knownLocalSessionIds; var scanningStore = _store;
+            var scanned = await Task.Run(async () =>
             {
-                try
-                {
-                    var live = await client.ListAsync(_lifetime.Token);
-                    if (!ReferenceEquals(client, _client) || !client.IsConnected) return;
-                    var merged = local.ToDictionary(x => x.Id);
-                    foreach (var item in live)
-                    {
-                        if (item.IsLive) _sessionConnectionFailures.Remove(item.Id);
-                        if (merged.TryGetValue(item.Id, out var disk)) merged[item.Id] = item with
-                        { FilePath = disk.FilePath, Title = string.IsNullOrEmpty(item.Title) ? disk.Title : item.Title, ParentId = item.ParentId ?? disk.ParentId, Model = item.Model.Length > 0 ? item.Model : disk.Model,
-                            State = item.State == SessionState.Unknown && !_attached.Contains(item.Id) ? disk.State : item.State, FileVersion = disk.FileVersion };
-                        else merged[item.Id] = item;
-                    }
-                    _sessions = merged.Values.OrderByDescending(x => x.UpdatedAt).ToArray();
-                }
-                catch (Exception e) when (e is IOException or RpcException or OperationCanceledException)
-                {
-                    var retained = local.ToDictionary(s => s.Id);
-                    foreach (var attached in _sessions.Where(s => _attached.Contains(s.Id))) retained[attached.Id] = attached;
-                    _sessions = retained.Values.OrderByDescending(s => s.UpdatedAt).ToArray();
-                    if (force) NoticeText("ReadFailed", InfoBarSeverity.Warning);
-                }
+                var items = await scanningStore.ListAsync(_lifetime.Token).ConfigureAwait(false);
+                var ids = items.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
+                var added = previousLocal is null ? Array.Empty<string>() : items.Where(x => !previousLocal.Contains(x.Id) && x.CreatedAt >= _sessionStartup).Select(x => x.Id).ToArray();
+                return (Items: items, Ids: ids, Added: added);
+            }, _lifetime.Token);
+            if (!ReferenceEquals(scanningStore, _store)) return;
+            _localSessionSnapshot = scanned.Items; _knownLocalSessionIds = scanned.Ids; foreach (var id in scanned.Added) _unreadSessionIds.Add(id);
+            var client = _client is { IsConnected: true } connected ? connected : null;
+            if (_sessionCatalog is null || !ReferenceEquals(_sessionCatalogClient, client))
+            {
+                _sessionQueryCancellation?.Cancel(); _sessionCatalogClient = client; _sessionCatalogBaseline = true;
+                if (!ReferenceEquals(_sessionEventClient, client)) { _sessionEventMetadata.Clear(); _sessionEventClient = client; }
+                _sessionCatalog = new(scanned.Items, client is null ? null : (archived, cursor, ct) => client.ListPageAsync(archived, cursor, ct));
+                foreach (var observed in _sessionEventMetadata.Values) _sessionCatalog.Observe(observed);
             }
-            else _sessions = local;
-            ApplyFilter(force);
+            else _sessionCatalog.SetLocal(scanned.Items);
+            if (!await ReloadSessionQueryAsync(refresh: true)) return;
             if (_selected is { } selected)
             {
                 var updated = _sessions.FirstOrDefault(x => x.Id == selected.Id);
@@ -303,53 +298,52 @@ public sealed partial class MainWindow : Window
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { NoticeText("ReadFailed", InfoBarSeverity.Error); }
-        finally { _refreshLock.Release(); }
+        finally { if (_sessionQueryCancellation is null) SetSessionLoading(false); _refreshLock.Release(); }
     }
     private void ApplyFilter(bool force = false)
     {
         if (!_ready) return;
-        var anchorGeneration = ++_sessionAnchorGeneration;
-        var inputVersion = _sessionAnchorInputVersion;
+        if (_sessionCatalog is not null) { _ = ReloadSessionQueryAsync(); return; }
+        var query = CurrentSessionQuery();
+        var visible = _sessions.Where(s => query.Matches(s, TimeZoneInfo.Local)).OrderByDescending(s => s.UpdatedAt).ThenByDescending(s => s.CreatedAt).ThenBy(s => s.Id, StringComparer.Ordinal).ToArray();
+        ApplySessionRows(visible, true);
+        SessionCount.Text = _text.Format("SessionCount", _text.Number(visible.Length));
+    }
+    private void ApplySessionRows(IReadOnlyList<SessionInfo> sessions, bool observeAdditions, bool observeContent = true)
+    {
+        var anchorGeneration = ++_sessionAnchorGeneration; var inputVersion = _sessionAnchorInputVersion;
         SessionRow? anchor = null; double anchorY = 0;
-        if (_pendingSessionAnchor is { } pending && _pendingSessionAnchorInput == inputVersion && _visibleSessionRows.Contains(pending))
+        if (!_resetSessionViewport && _pendingSessionAnchor is { } pending && _pendingSessionAnchorInput == inputVersion && _visibleSessionRows.Contains(pending))
         { anchor = pending; anchorY = _pendingSessionAnchorY; }
-        else if (SessionList.ItemsPanelRoot is ItemsStackPanel { FirstVisibleIndex: >= 0 } panel && panel.FirstVisibleIndex < _visibleSessionRows.Count &&
-            SessionList.ContainerFromIndex(panel.FirstVisibleIndex) is FrameworkElement first)
+        else if (!_resetSessionViewport && SessionList.ItemsPanelRoot is ItemsStackPanel { FirstVisibleIndex: >= 0 } panel && panel.FirstVisibleIndex < _visibleSessionRows.Count && SessionList.ContainerFromIndex(panel.FirstVisibleIndex) is FrameworkElement first)
         { anchor = _visibleSessionRows[panel.FirstVisibleIndex]; anchorY = first.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y; }
-        var incoming = _sessions.ToDictionary(s => s.Id);
-        var removed = _sessionOrder.Where(id => !incoming.ContainsKey(id)).ToArray();
-        var added = _sessions.Where(s => !_sessionRows.ContainsKey(s.Id)).ToArray();
-        var announceNew = _sessionBaselineLoaded && added.Length > 0;
-        var connected = _client is { IsConnected: true };
-        foreach (var id in removed) { _sessionRows.Remove(id); _sessionOrder.Remove(id); }
-        foreach (var session in _sessions)
+        var connected = _client is { IsConnected: true }; var ids = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        var added = sessions.Where(s => !_sessionRows.ContainsKey(s.Id)).ToArray();
+        var announceNew = observeAdditions && _sessionBaselineLoaded && added.Length > 0;
+        var visible = sessions.Select(session =>
         {
-            if (_sessionRows.TryGetValue(session.Id, out var row)) row.Update(session, _text, connected, _selected?.Id == session.Id);
-            else _sessionRows.Add(session.Id, new(session, _text, connected, _sessionBaselineLoaded && _selected?.Id != session.Id));
-        }
-        // Existing rows retain their relative order while transcripts stream. Only new sessions enter at the top.
-        _sessionOrder.InsertRange(0, added.Select(s => s.Id));
-        _sessionBaselineLoaded = true;
-        var query = SessionSearch.Text.Trim(); var filter = SessionFilter.SelectedIndex;
-        var visible = _sessionOrder.Select(id => _sessionRows[id]).Where(row =>
-        {
-            var s = row.Session;
-            return (filter != 1 || s.State is SessionState.Active or SessionState.RecordedActive or SessionState.Waiting)
-            && (filter != 2 || s.IsArchived) && (query.Length == 0 || $"{s.Title} {s.Cwd} {s.Id} {s.ParentId} {s.Source}".Contains(query, StringComparison.CurrentCultureIgnoreCase));
+            if (_sessionRows.TryGetValue(session.Id, out var row)) row.Update(session, _text, connected, _selected?.Id == session.Id, observeContent);
+            else _sessionRows[session.Id] = row = new(session, _text, connected, _selected?.Id != session.Id && (_unreadSessionIds.Contains(session.Id) || observeAdditions && _sessionBaselineLoaded));
+            return row;
         }).ToArray();
-        _syncing = true;
+        var structureChanged = _visibleSessionRows.Count != visible.Length || !_visibleSessionRows.SequenceEqual(visible);
+        _sessionBaselineLoaded = true; _syncing = true;
         try
         {
-            // Changing list-wide transitions reanimates recycled existing rows and flashes the entire pane.
             SessionList.ItemContainerTransitions = _noSessionTransitions;
-            var visibleIds = visible.Select(row => row.Session.Id).ToHashSet();
-            for (int i = _visibleSessionRows.Count - 1; i >= 0; i--) if (!visibleIds.Contains(_visibleSessionRows[i].Session.Id)) _visibleSessionRows.RemoveAt(i);
+            for (int i = _visibleSessionRows.Count - 1; i >= 0; i--) if (!ids.Contains(_visibleSessionRows[i].Session.Id)) _visibleSessionRows.RemoveAt(i);
             for (int i = 0; i < visible.Length; i++)
-                if (i >= _visibleSessionRows.Count || !ReferenceEquals(_visibleSessionRows[i], visible[i])) _visibleSessionRows.Insert(i, visible[i]);
-            if (_selected is not null) SessionList.SelectedItem = visible.FirstOrDefault(x => x.Session.Id == _selected.Id);
+            {
+                if (i < _visibleSessionRows.Count && ReferenceEquals(_visibleSessionRows[i], visible[i])) continue;
+                var oldIndex = _visibleSessionRows.IndexOf(visible[i]);
+                if (oldIndex >= 0) _visibleSessionRows.Move(oldIndex, i); else _visibleSessionRows.Insert(i, visible[i]);
+            }
+            if (_selected is not null && visible.FirstOrDefault(row => row.Session.Id == _selected.Id) is { } selected) SessionList.SelectedItem = selected;
         }
         finally { _syncing = false; }
-        if (anchor is not null && (added.Length > 0 || removed.Length > 0 || ReferenceEquals(anchor, _pendingSessionAnchor)) && _visibleSessionRows.Contains(anchor))
+        // Row objects only cover loaded matches; the lightweight metadata index remains in the worker catalog.
+        foreach (var id in _sessionRows.Keys.Where(id => !ids.Contains(id) && id != _selected?.Id).ToArray()) _sessionRows.Remove(id);
+        if (anchor is not null && (structureChanged || ReferenceEquals(anchor, _pendingSessionAnchor)) && _visibleSessionRows.Contains(anchor))
         {
             var captured = anchor;
             _pendingSessionAnchor = anchor; _pendingSessionAnchorY = anchorY; _pendingSessionAnchorInput = inputVersion;
@@ -377,19 +371,19 @@ public sealed partial class MainWindow : Window
             });
         }
         else _pendingSessionAnchor = null;
-        NoSessionsPanel.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        SessionCount.Text = _text.Format("SessionCount", visible.Length);
+        NoSessionsPanel.Visibility = visible.Length == 0 && !_sessionQueryLoading ? Visibility.Visible : Visibility.Collapsed;
         if (announceNew) AccessibilitySupport.Announce(SessionCount, _text.Format("NewSessionsAvailable", _text.Number(added.Length)), "new-sessions");
     }
-    private void OnSessionSearchChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) => ApplyFilter();
-    private void OnFilterChanged(object sender, SelectionChangedEventArgs e) { if (!_syncing) ApplyFilter(); }
+    private void OnSessionSearchChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    { if (!_syncing) ScheduleSessionQuery(true, args.Reason == AutoSuggestionBoxTextChangeReason.UserInput); }
+    private void OnFilterChanged(object sender, SelectionChangedEventArgs e) { if (!_syncing) ScheduleSessionQuery(true); }
     private async void OnRefresh(object sender, RoutedEventArgs e) => await RefreshAsync(true);
     private async void OnSessionSelected(object sender, SelectionChangedEventArgs e)
     {
         if (_syncing || SessionList.SelectedItem is not SessionRow row) return;
         _sessionConnectCancellation?.Cancel();
         _sessionAvailabilityCancellation?.Cancel();
-        row.MarkRead();
+        row.MarkRead(); _unreadSessionIds.Remove(row.Session.Id);
         if (_selected is not null) _drafts[_selected.Id] = Composer.Text;
         _selected = row.Session; _snapshot = null; _selectedLength = -1; _following = true;
         _readingActivityHistory = false;
@@ -590,7 +584,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var wasConnected = _client is { IsConnected: true };
-            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); InvalidateTranscriptRead(); await old.DisposeAsync(); }
+            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); await old.DisposeAsync(); }
             _serverEvents.Clear();
             if (!wasConnected)
             {
@@ -677,7 +671,7 @@ public sealed partial class MainWindow : Window
         {
             if (!_closing && ReferenceEquals(_client, client))
             {
-                _attached.Clear(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
+                _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
                 if (_selected is { } session && File.Exists(session.FilePath)) await LoadTranscriptAsync(session, false);
             }
         });
@@ -755,7 +749,9 @@ public sealed partial class MainWindow : Window
         _sessionConnectionFailures.Remove(original.Id);
         _sessionServerCheckedAt[original.Id] = DateTimeOffset.UtcNow;
         _attached.Add(original.Id);
-        var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = runtime.Model.Length > 0 ? runtime.Model : original.Model, FileVersion = original.FileVersion };
+        var joined = runtime with { CreatedAt = original.CreatedAt, UpdatedAt = original.UpdatedAt, ContentRevision = original.ContentRevision, FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = runtime.Model.Length > 0 ? runtime.Model : original.Model, FileVersion = original.FileVersion };
+        if (!ReferenceEquals(_sessionEventClient, _client)) { _sessionEventMetadata.Clear(); _sessionEventClient = _client; }
+        _sessionCatalog?.Observe(joined); _sessionEventMetadata[joined.Id] = joined;
         _sessions = _sessions.Select(s => s.Id == original.Id ? joined : s).ToArray();
         if (_selected?.Id == original.Id) { _selected = joined; _snapshot = new(joined, Array.Empty<TranscriptEntry>()); }
         ApplyFilter();
@@ -794,7 +790,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task<SessionInfo> CheckResumeStateAsync(SessionInfo original, CancellationToken ct)
     {
-        var local = (await _store.ListAsync(ct)).FirstOrDefault(s => s.Id == original.Id) ?? original;
+        var local = (await Task.Run(() => _store.ListAsync(ct), ct)).FirstOrDefault(s => s.Id == original.Id) ?? original;
         if (_client is { IsConnected: true } client && (await client.LoadedThreadIdsAsync(ct)).Contains(original.Id))
             return (await client.RuntimeAsync(original.Id, ct)) with { FilePath = local.FilePath, Title = local.Title, ParentId = local.ParentId, FileVersion = local.FileVersion };
         return local;
@@ -878,8 +874,11 @@ public sealed partial class MainWindow : Window
     private void UpdateSessionActivity(RpcMessage message)
     {
         var p = message.Parameters; var id = p.Str("threadId");
-        if (!_sessionRows.TryGetValue(id, out var row)) return;
-        var session = row.Session;
+        if (!ReferenceEquals(_sessionEventClient, _client)) { _sessionEventMetadata.Clear(); _sessionEventClient = _client; }
+        _sessionRows.TryGetValue(id, out var row);
+        var session = _sessionEventMetadata.GetValueOrDefault(id) ?? row?.Session ?? _sessionMetadataIndex.GetValueOrDefault(id);
+        if (session is null) return;
+        var content = message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/reasoning/textDelta" or "item/plan/delta" or "item/started" or "item/completed" or "turn/plan/updated" or "turn/diff/updated" or "error" or "warning";
         var changed = message.Method switch
         {
             "thread/name/updated" => session with { Title = p.Str("threadName", session.Title) },
@@ -892,14 +891,20 @@ public sealed partial class MainWindow : Window
             "thread/status/changed" => session with { State = CodexClient.ParseState(p.Field("status")), IsLive = CodexClient.ParseState(p.Field("status")) != SessionState.Unknown },
             _ => session
         };
+        if (content && DateTimeOffset.UtcNow - changed.UpdatedAt > TimeSpan.FromSeconds(1)) changed = changed with { UpdatedAt = DateTimeOffset.UtcNow };
         if (changed != session)
         {
-            _sessions = _sessions.Select(s => s.Id == id ? changed : s).ToArray();
-            row.Update(changed, _text, true, _selected?.Id == id);
+            _sessionEventMetadata[id] = changed; _sessionCatalog?.Observe(changed);
+            if (_sessionCatalog is null) _sessions = _sessions.Select(s => s.Id == id ? changed : s).ToArray();
+            row?.Update(changed, _text, true, _selected?.Id == id);
             if (_selected?.Id == id) _selected = changed;
+            QueueSessionReorder();
         }
-        if (message.Method is "item/agentMessage/delta" or "item/reasoning/summaryTextDelta" or "item/reasoning/textDelta" or "item/plan/delta" or "item/started" or "item/completed" or
-            "turn/plan/updated" or "turn/diff/updated" or "error" or "warning") row.MarkUpdated(_selected?.Id == id);
+        if (content)
+        {
+            row?.MarkUpdated(_selected?.Id == id);
+            if (_selected?.Id != id) _unreadSessionIds.Add(id);
+        }
     }
     private async Task HandleRequestAsync(CodexClient client, RpcMessage message)
     {
@@ -1201,7 +1206,7 @@ public sealed partial class MainWindow : Window
         _settings = _settings with { CodexHome = Path.GetFullPath(home.Home), Executable = exe.Executable, UseSharedServer = mode.SelectedIndex == 1, Endpoint = discovery.Endpoint, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex] };
         try { _settings.Save(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
-        _store = new(_settings.CodexHome); _text = new(_settings.Language);
+        _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json")); _sessionCatalog = null; _knownLocalSessionIds = null; _text = new(_settings.Language);
         if (changedConnection) { _sessionAvailabilityCancellation?.Cancel(); _sessionServerCheckedAt.Clear(); _sessionConnectionFailures.Clear(); }
         Localize();
         if (changedConnection && _client is not null) { var old = _client; _client = null; _attached.Clear(); await old.DisposeAsync(); NoticeText("RestartConnection"); }

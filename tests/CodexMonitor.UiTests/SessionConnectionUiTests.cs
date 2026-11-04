@@ -169,6 +169,18 @@ public sealed class SessionConnectionUiTests
         Assert.IsFalse(runtime.Methods.Contains("turn/start"));
     }
     [UITestMethod]
+    public async Task AttachingRuntimeMetadataKeepsTheOriginalContentTimeAndRowIdentity()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");
+        var before = window.ReviewSessionRows.Single(r => r.Session.Id == "review-session"); var time = before.Session.UpdatedAt;
+        var runtime = new Runtime(); window.SetSessionServerReview(new(new JsonRpcClient(runtime)));
+        window.ConfigureSessionConnectionReview(new Locator(false), (_, _) => throw new InvalidOperationException());
+        await window.ConnectSessionReviewAsync();
+        var after = window.ReviewSessionRows.Single(r => r.Session.Id == "review-session");
+        Assert.AreSame(before, after); Assert.AreEqual(time, after.Session.UpdatedAt); Assert.IsFalse(after.HasUnread); Assert.IsTrue(window.ReviewSessionAttached);
+        await window.DisconnectReviewServerAsync(); Assert.AreEqual(time, after.Session.UpdatedAt); Assert.IsFalse(after.HasUnread);
+    }
+    [UITestMethod]
     public async Task RestoreRechecksAgainAfterServerConnectionAndNeverResumesAChangedActiveThread()
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 650, "Dark", "zh-CN");

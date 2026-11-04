@@ -33,11 +33,11 @@ public sealed partial class SessionRow(SessionInfo session, LocalizationService 
         (IsRunning && Session.State == SessionState.Waiting ? ", " + RunningText : "") + (HasUnread ? ", " + UpdatedText : "");
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public void Update(SessionInfo session, LocalizationService text, bool connected, bool selected)
+    public void Update(SessionInfo session, LocalizationService text, bool connected, bool selected, bool observeContent = true)
     {
+        if (Session == session && _text.LanguageTag == text.LanguageTag && _connected == connected && (!selected || !HasUnread)) return;
         var old = Values();
-        var changedContent = Session.FileVersion is { } before && session.FileVersion is { } after ? before != after :
-            Session.FileVersion is null && session.FileVersion is null && session.UpdatedAt > Session.UpdatedAt;
+        var changedContent = observeContent && SessionMetadata.ContentChanged(Session, session);
         if (changedContent && !selected) HasUnread = true;
         if (selected) HasUnread = false;
         Session = session; _text = text; _connected = connected;

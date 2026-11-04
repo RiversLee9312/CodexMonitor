@@ -13,7 +13,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.11" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.12" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new JsonObject(), ct).ConfigureAwait(false);
     }
@@ -33,6 +33,14 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
             } while (!string.IsNullOrEmpty(cursor));
         }
         return all;
+    }
+    public async Task<SessionPage> ListPageAsync(bool archived, string? cursor = null, CancellationToken ct = default)
+    {
+        var result = await Rpc.RequestAsync("thread/list", new JsonObject { ["cursor"] = cursor, ["limit"] = SessionCatalog.PageSize,
+            ["sortKey"] = "updated_at", ["sortDirection"] = "desc", ["sourceKinds"] = new JsonArray(AllSources.Select(s => (JsonNode?)JsonValue.Create(s)).ToArray()),
+            ["modelProviders"] = new JsonArray(), ["archived"] = archived, ["useStateDbOnly"] = true }, ct).ConfigureAwait(false);
+        var next = result.Str("nextCursor"); if (next.Length > 0 && next == cursor) throw new IOException("Repeated session pagination cursor");
+        return new(result.Field("data").Items().Select(s => ParseSession(s) with { IsArchived = archived }).ToArray(), next.Length > 0 ? next : null);
     }
     public async Task<SessionInfo> ReadAsync(string id, CancellationToken ct = default)
     {

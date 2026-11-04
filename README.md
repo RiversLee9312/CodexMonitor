@@ -7,6 +7,8 @@ A Windows transcript viewer and lightweight Codex CLI client, built with C# and 
 ## Features
 
 * Discover, search and read local conversations, archives and subagent activity.
+* Filter by creation or update date: today, the last 7/30 days or a custom range.
+* Automatically page the conversation list in batches of 50, with asynchronous scanning, cancellable search and stable scrolling.
 * Display known models beside each Codex response without relabeling earlier turns.
 * Read commands, patches, MCP results and waiting states. Activity groups start expanded and collapse to a category/count summary.
 * Use one “Working” placeholder for observed non-message generation; text and reasoning stream directly.
@@ -23,7 +25,7 @@ Download the MSI and SHA-256 file from [Releases](https://github.com/RiversLee93
 
 Local viewing does not start inference. Live connections require an installed, signed-in Codex CLI. Choose a Codex home in Settings or use discovery. **Connect app server** joins a running session’s owner; **Resume** loads eligible history so you can continue it. Sending and interrupting are explicit actions. An independent CLI process without a shared listener cannot be attached through the app-server protocol.
 
-Local files are authoritative before attachment; app-server is authoritative after attachment. Disconnecting returns to local files. Settings and crash diagnostics are under `%LOCALAPPDATA%\CodexMonitor`.
+Local files are authoritative before attachment; app-server is authoritative after attachment. Disconnecting returns to local files. The local metadata index is cached in the app’s own data folder; Codex files are never changed for indexing. Settings and crash diagnostics are under `%LOCALAPPDATA%\CodexMonitor`.
 
 ## Protocol limits
 

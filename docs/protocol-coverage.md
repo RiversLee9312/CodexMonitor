@@ -56,3 +56,9 @@ item/tool/requestUserInput（兼容旧 tool/requestUserInput）映射选择、�
 Responses API 的 output_item.added、函数/自定义/MCP 参数、代码生成与图像生成进度统一为生成占位；直接消息和推理继续流式呈现。安装版 app-server 没有暴露这些 Responses 生成增量，原生 item/started 仍代表实际活动，不虚构前置生成阶段。补充 MCP、file_search、code_interpreter、program/program_output 的已知 Responses 结果布局。
 
 参考：[App-server](https://learn.chatgpt.com/docs/app-server)、[Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Function calling](https://developers.openai.com/api/docs/guides/function-calling)。
+
+## 0.1.12：列表分页与时间检索
+
+侧栏改用 thread/list 的 50 项游标页，显式指定 updated_at/desc，分别处理活动和归档目录。后续页不被视为新会话事件。连接与恢复保留原有内容时间；本地元数据按语义记录的 timestamp 与内容指纹判断变化，排除 turn_context 等元数据写入。真实内容更新以同一行对象移动位置，不冻结时间排序，也不重复插入已有行。
+
+日期条件与关键词在后台组合执行；查询可跨尚未展示的元数据页，取消后不得提交旧游标/结果。日期使用本地日历日，范围包含结束日。服务器对日期没有等价过滤字段时在客户端过滤，并利用更新时间下界停止不必要的翻页。[官方 thread/list 文档](https://learn.chatgpt.com/docs/app-server)；[Microsoft 数据虚拟化指南](https://learn.microsoft.com/en-us/windows/apps/develop/performance/listview-and-gridview-data-optimization)。

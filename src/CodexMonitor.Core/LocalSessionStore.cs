@@ -4,15 +4,36 @@ using System.Text.RegularExpressions;
 
 namespace CodexMonitor.Core;
 
-public sealed partial class LocalSessionStore(string home)
+public sealed partial class LocalSessionStore(string home, string? cachePath = null)
 {
     private readonly ConcurrentDictionary<string, (long Length, DateTime Modified, SessionInfo Info)> _cache = new();
+    private readonly SemaphoreSlim _scan = new(1);
+    private bool _loadedCache;
     public string Home { get; } = Path.GetFullPath(home);
     public static string DefaultHome => Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } h ? h :
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
 
     public async Task<IReadOnlyList<SessionInfo>> ListAsync(CancellationToken ct = default)
     {
+        await _scan.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+        if (!_loadedCache)
+        {
+            _loadedCache = true;
+            try
+            {
+                if (cachePath is not null && File.Exists(cachePath))
+                {
+                    await using var cachedStream = File.OpenRead(cachePath);
+                    var saved = await JsonSerializer.DeserializeAsync(cachedStream, CoreJsonContext.Default.LocalSessionCache, ct).ConfigureAwait(false);
+                    if (saved is { Version: 1 } && string.Equals(saved.Home, Home, StringComparison.OrdinalIgnoreCase))
+                        foreach (var entry in saved.Entries) _cache[entry.Path] = (entry.Length, entry.Modified, entry.Session);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
+        }
+        var changed = 0;
         var titles = new Dictionary<string, string>();
         var indexPath = Path.Combine(Home, "session_index.jsonl");
         if (File.Exists(indexPath))
@@ -27,7 +48,9 @@ public sealed partial class LocalSessionStore(string home)
         }
         var result = new ConcurrentBag<SessionInfo>();
         var files = new[] { "sessions", "archived_sessions" }.SelectMany(dir =>
-            Directory.Exists(Path.Combine(Home, dir)) ? Directory.EnumerateFiles(Path.Combine(Home, dir), "*.jsonl", SearchOption.AllDirectories) : []);
+            Directory.Exists(Path.Combine(Home, dir)) ? Directory.EnumerateFiles(Path.Combine(Home, dir), "*.jsonl", SearchOption.AllDirectories) : []).ToArray();
+        var paths = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var old in _cache.Keys) if (!paths.Contains(old)) { _cache.TryRemove(old, out _); changed = 1; }
         await Parallel.ForEachAsync(files, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct }, async (path, token) =>
         {
             try
@@ -43,9 +66,10 @@ public sealed partial class LocalSessionStore(string home)
                         IsArchived = Path.GetRelativePath(Home, path).StartsWith("archived_sessions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) };
                     await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
                     // Metadata and recent lifecycle markers never require scanning a multi-gigabyte rollout.
-                    const int headBytes = 256 * 1024, tailBytes = 1024 * 1024;
+                    const int headBytes = 64 * 1024, tailBytes = 256 * 1024;
                     var length = stream.Length;
                     var ranges = length <= headBytes + tailBytes ? new[] { (Start: 0L, End: length) } : new[] { (Start: 0L, End: (long)headBytes), (Start: length - tailBytes, End: length) };
+                    DateTimeOffset contentTime = default; (string Text, long Offset)? lastContent = null;
                     foreach (var range in ranges)
                     {
                         stream.Position = range.Start;
@@ -65,32 +89,42 @@ public sealed partial class LocalSessionStore(string home)
                                 try { using var meta = JsonDocument.Parse(line); if (meta.RootElement.Str("type") == "session_meta") info = TranscriptParser.Metadata(info, meta.RootElement.Field("payload")); }
                                 catch (JsonException) { }
                             }
-                        if (!line.Contains("task_started", StringComparison.Ordinal) && !line.Contains("task_complete", StringComparison.Ordinal)
-                            && !line.Contains("turn_started", StringComparison.Ordinal) && !line.Contains("turn_complete", StringComparison.Ordinal)
-                            && !line.Contains("turn_aborted", StringComparison.Ordinal) && !line.Contains("task_interrupted", StringComparison.Ordinal)
-                            && !line.Contains("turn_context", StringComparison.Ordinal) && !(info.Title.Length == 0 && line.Contains("response_item", StringComparison.Ordinal) && line.Contains("user", StringComparison.Ordinal))) continue;
-                        try
-                        {
-                            using var d = JsonDocument.Parse(line); var r = d.RootElement; var p = r.Field("payload");
-                            if (info.Title.Length == 0 && r.Str("type") == "response_item" && p.Str("type") == "message" && p.Str("role") == "user")
+                            try
                             {
-                                var message = string.Join(" ", p.Field("content").Items().Select(x => x.Str("text"))).Trim();
-                                if (message.Length > 0 && !message.StartsWith('<')) info = info with { Title = message[..Math.Min(180, message.Length)].Replace('\n', ' ').Replace('\r', ' ') };
+                                using var d = JsonDocument.Parse(line); var r = d.RootElement; var p = r.Field("payload");
+                                var type = r.Str("type"); var kind = p.Str("type");
+                                var semantic = type == "response_item" && kind != "configuration_update" || type == "event_msg" && kind is
+                                    "user_message" or "agent_message" or "agent_reasoning" or "agent_reasoning_delta" or "agent_message_delta" or
+                                    "item_started" or "item_completed" or "task_started" or "task_complete" or "turn_started" or "turn_complete" or "turn_aborted" or "task_interrupted" ||
+                                    type is "item.started" or "item.completed" or "agent_message";
+                                if (semantic)
+                                {
+                                    var time = r.Date("timestamp"); if (time > contentTime) contentTime = time; lastContent = record;
+                                }
+                                if (info.Title.Length == 0 && type == "response_item" && kind == "message" && p.Str("role") == "user")
+                                {
+                                    var message = string.Join(" ", p.Field("content").Items().Select(x => x.Str("text"))).Trim();
+                                    if (message.Length > 0 && !message.StartsWith('<')) info = info with { Title = message[..Math.Min(180, message.Length)].Replace('\n', ' ').Replace('\r', ' ') };
+                                }
+                                if (type == "turn_context") info = info with { Model = p.Str("model", info.Model) };
+                                if (type != "event_msg") continue;
+                                info = kind switch
+                                {
+                                    "task_started" or "turn_started" => info with { State = SessionState.RecordedActive, ActiveTurnId = p.Str("turn_id") },
+                                    "task_complete" or "turn_complete" => info with { State = SessionState.Completed, ActiveTurnId = null },
+                                    "turn_aborted" or "task_interrupted" => info with { State = SessionState.Interrupted, ActiveTurnId = null }, _ => info
+                                };
                             }
-                            if (r.Str("type") == "turn_context") info = info with { Model = p.Str("model", info.Model) };
-                            if (r.Str("type") != "event_msg") continue;
-                            info = p.Str("type") switch
-                            {
-                                "task_started" or "turn_started" => info with { State = SessionState.RecordedActive, ActiveTurnId = p.Str("turn_id") },
-                                "task_complete" or "turn_complete" => info with { State = SessionState.Completed, ActiveTurnId = null },
-                                "turn_aborted" or "task_interrupted" => info with { State = SessionState.Interrupted, ActiveTurnId = null },
-                                _ => info
-                            };
-                        }
-                        catch (JsonException) { }
+                            catch (JsonException) { }
                         }
                     }
+                    if (lastContent is { } last)
+                    {
+                        var signature = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(last.Text)));
+                        info = info with { UpdatedAt = contentTime != default ? contentTime : info.UpdatedAt, ContentRevision = last.Offset + ":" + signature };
+                    }
                     _cache[path] = (file.Length, file.LastWriteTimeUtc, info);
+                    Interlocked.Exchange(ref changed, 1);
                 }
                 if (titles.TryGetValue(info.Id, out var title) && !string.IsNullOrWhiteSpace(title)) info = info with { Title = title };
                 result.Add(info);
@@ -98,9 +132,24 @@ public sealed partial class LocalSessionStore(string home)
             catch (IOException) { } // A rollout can be moved to the archive during enumeration.
             catch (UnauthorizedAccessException) { }
         });
-        return result.OrderByDescending(x => x.UpdatedAt).ToArray();
+        if (changed != 0 && cachePath is not null)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                await using (var output = new FileStream(cachePath + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous))
+                    await JsonSerializer.SerializeAsync(output, new LocalSessionCache(1, Home, _cache.Select(p => new LocalSessionCacheEntry(p.Key, p.Value.Length, p.Value.Modified, p.Value.Info)).ToArray()), CoreJsonContext.Default.LocalSessionCache, ct).ConfigureAwait(false);
+                File.Move(cachePath + ".tmp", cachePath, true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return result.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id, StringComparer.Ordinal).ToArray();
+        }
+        finally { _scan.Release(); }
     }
 
     [GeneratedRegex(@"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")]
     private static partial Regex IdPattern();
 }
+internal sealed record LocalSessionCache(int Version, string Home, LocalSessionCacheEntry[] Entries);
+internal sealed record LocalSessionCacheEntry(string Path, long Length, DateTime Modified, SessionInfo Session);

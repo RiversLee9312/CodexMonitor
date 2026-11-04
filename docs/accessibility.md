@@ -22,7 +22,7 @@ Windows 11 x64、200% 显示缩放，2026-11-03–04。
 
 MSTest 在生产 XAML 上验证控件名称、Invoke/ExpandCollapse、禁用状态、焦点返回、图标缩放和阅读位置。另以 225% 字号压力验证 560 DIP 窄窗口的中文、德语与阿拉伯语排版。字号压力通过测试宿主逐控件放大，不等同于更改 Windows 的全局 Text size 设置。
 
-微软 Axe.Windows 2.4.2 由独立只读扫描进程检查合成测试窗口，覆盖浅色中文、深色德语、深色 RTL 、许可证页及服务器状态，以及浅色中文/深色 RTL 提问界面共七种场景。报告保存在本地 `artifacts/accessibility`。GDI 屏幕截图在当前桌面会话可能返回句柄错误，此时重新运行完整规则扫描并保留 JSON 报告，明确记录 ScreenshotUnavailable；MSTest 同时附上 WinUI RenderTargetBitmap 截图。不会用旧报告代替失败的扫描。扫描进程不上传数据。
+微软 Axe.Windows 2.4.2 由独立只读扫描进程检查合成测试窗口，覆盖浅色中文、深色德语、深色 RTL、许可证页及服务器状态、浅色中文/深色 RTL 提问界面，以及中文/德语/阿拉伯语日期筛选浮层，共十种场景。报告保存在本地 `artifacts/accessibility`。原生浮层独立于主 XAML 根，使用 Axe 的 GDI 截图核对；主窗口另附 WinUI RenderTargetBitmap 截图。若 GDI 截图不可用，报告明确记录 ScreenshotUnavailable；不会用旧报告代替失败的扫描。扫描进程不上传数据。
 
 真实窗口已检查窄屏与宽屏、深浅标题栏及查找的键盘操作。系统“对比主题”设置页在本机未成功加载，因此未完成系统对比主题的人工切换核验；测试没有更改系统显示设置。Narrator 的语音全流程、实际全局 Text size、Windows 10 与 ARM64 真机仍需独立验证。自动扫描与布局断言不能代表无障碍认证。
 

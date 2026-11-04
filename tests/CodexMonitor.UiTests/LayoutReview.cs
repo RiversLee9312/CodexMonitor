@@ -19,7 +19,9 @@ public sealed partial class MainWindow
 
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
-        InvalidateTranscriptRead(); SetLatestVisible(false);
+        _sessionDateFlyout?.Hide(); InvalidateTranscriptRead(); SetLatestVisible(false);
+        _sessionQueryCancellation?.Cancel(); _sessionQueryCancellation = null; _sessionEventClient = null; _sessionCatalogBaseline = true; _localSessionSnapshot = Array.Empty<SessionInfo>(); _sessionPageIntent = _sessionConsumedPageIntent = 0; ++_sessionQueryGeneration; _sessionCatalog = null; _sessionCatalogClient = null; _sessionLimit = SessionCatalog.PageSize; _sessionHasMore = _sessionQueryLoading = _resetSessionViewport = false; _sessionReorderTimer?.Stop(); _sessionMetadataIndex = new Dictionary<string, SessionInfo>(); _knownLocalSessionIds = null; _sessionEventMetadata.Clear(); _unreadSessionIds.Clear(); _sessionDateField = SessionDateField.Updated; _sessionDateFrom = _sessionDateThrough = null;
+        _syncing = true; SessionSearch.Text = ""; _syncing = false;
         _serverEvents.Clear(); _historySessionId = null; _historyClient = null; _historyStart = null; _historyCursor = null; _hasEarlier = _loadingEarlier = _pagedReview = false; _activityGroupIdentities.Clear();
         _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
         foreach (var item in _reviewFontOverrides) item.Element.SetValue(item.Property, item.Value);
@@ -30,6 +32,7 @@ public sealed partial class MainWindow
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
         _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language };
+        _store = new(_settings.CodexHome);
         _sessionAvailabilityCancellation?.Cancel(); _sessionServerCheckedAt.Clear();
         Notice.IsOpen = false; _attached.Clear(); _expandedActivities.Clear(); _activityScrollOffsets.Clear(); _sessionConnectionFailures.Clear(); _connectionEndpoint = null;
         _cliMissing = false; _readingActivityHistory = false; _homeDiscovery = new ReviewHomeDiscovery(); _resolveExecutable = _ => "C:\\codex.exe"; _checkResumeState = CheckResumeStateAsync;
@@ -328,6 +331,35 @@ public sealed partial class MainWindow
     }
 
     internal System.Collections.ObjectModel.ObservableCollection<SessionRow> ReviewSessionRows => _visibleSessionRows;
+    internal bool ReviewSessionsLoading => _sessionQueryCancellation is not null;
+    internal int ReviewSessionRowModels => _sessionRows.Count;
+    internal async Task ReviewSessionCatalogAsync(IReadOnlyList<SessionInfo> local, Func<bool, string?, CancellationToken, Task<SessionPage>>? remote = null)
+    {
+        _sessionQueryCancellation?.Cancel(); _sessionQueryCancellation = null; _sessionEventClient = null; _sessionCatalogBaseline = true; _localSessionSnapshot = Array.Empty<SessionInfo>(); _sessionPageIntent = _sessionConsumedPageIntent = 0; ++_sessionQueryGeneration; _sessionCatalogClient = _client;
+        _sessionCatalog = new(local, remote); _sessionCatalogBaseline = true; _sessionLimit = SessionCatalog.PageSize;
+        await ReloadSessionQueryAsync(); await SettleAsync();
+    }
+    internal async Task ReviewSessionQueryAsync(string query, SessionDateField field = SessionDateField.Updated, DateOnly? from = null, DateOnly? through = null)
+    {
+        SessionSearch.Text = query; _sessionDateField = field; _sessionDateFrom = from; _sessionDateThrough = through; UpdateDateFilterChrome();
+        await ReloadSessionQueryAsync(reset: true); await SettleAsync(); await ReviewWaitSessionQueryAsync();
+    }
+    internal async Task ReviewScrollSessionsEndAsync()
+    {
+        TrackSessionListScroll(); ++_sessionPageIntent; ++_sessionAnchorInputVersion; _pendingSessionAnchor = null;
+        _sessionScroll!.ChangeView(null, _sessionScroll.ScrollableHeight, null, true); RequestMoreSessions(); await Task.Delay(25);
+    }
+    internal async Task ReviewWaitSessionQueryAsync()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (_sessionQueryCancellation is not null) await Task.Delay(10, deadline.Token); await SettleAsync();
+    }
+    internal async Task<DateFilterPanel> ReviewOpenDateFilterAsync()
+    {
+        OnSessionDates(DateFilterButton, new RoutedEventArgs()); await SettleAsync();
+        return Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).SelectMany(p => Descendants(p.Child)).OfType<DateFilterPanel>().Single();
+    }
+    internal void ReviewCloseDateFilter() => _sessionDateFlyout?.Hide();
     internal object ReviewSessionSource => SessionList.ItemsSource;
     internal object ReviewSelectedRow => SessionList.SelectedItem;
     internal int ReviewListTransitions => SessionList.ItemContainerTransitions.Count;

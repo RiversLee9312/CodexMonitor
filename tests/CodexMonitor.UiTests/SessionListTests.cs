@@ -48,8 +48,8 @@ public sealed class SessionListTests
             }
             Assert.AreSame(source, window.ReviewSessionSource);
             Assert.AreSame(selected, window.ReviewSelectedRow);
-            Assert.AreSame(rows[0], window.ReviewSessionRows[0]); Assert.AreSame(rows[1], window.ReviewSessionRows[1]);
-            Assert.HasCount(0, changes, "Ordinary transcript updates must not emit collection changes or Reset");
+            Assert.AreSame(rows[1], window.ReviewSessionRows[0]); Assert.AreSame(rows[0], window.ReviewSessionRows[1]);
+            CollectionAssert.AreEqual(new[] { NotifyCollectionChangedAction.Move }, changes, "A real content update moves the existing row once, without Reset or duplicate insertion");
             Assert.AreEqual(0, window.ReviewListTransitions);
             Assert.IsTrue(rows[1].HasUnread); Assert.IsFalse(rows[0].HasUnread);
             StringAssert.Contains(rows[1].AccessibleName, new LocalizationService("zh-CN")["SessionUpdated"]);
