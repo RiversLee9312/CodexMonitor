@@ -1,4 +1,5 @@
 using ZstdSharp;
+using System.Buffers;
 
 namespace CodexMonitor.Core;
 
@@ -52,12 +53,19 @@ public static class RolloutFiles
             {
                 await using var source = OpenRead(info.FullName);
                 await using var decoder = new DecompressionStream(source);
-                await decoder.CopyToAsync(temp, 65536, ct).ConfigureAwait(false);
+                var buffer = ArrayPool<byte>.Shared.Rent(65536);
+                try
+                {
+                    while (await decoder.ReadAsync(buffer.AsMemory(0, 65536), ct).ConfigureAwait(false) is var count && count > 0)
+                    { await temp.WriteAsync(buffer.AsMemory(0, count), ct).ConfigureAwait(false); HistoryMetrics.DecodeBytes.Add(count); ct.ThrowIfCancellationRequested(); }
+                }
+                finally { ArrayPool<byte>.Shared.Return(buffer); }
                 await temp.FlushAsync(ct).ConfigureAwait(false); ct.ThrowIfCancellationRequested();
                 // Do not cache a partial or changed representation.
                 var now = new FileInfo(info.FullName);
                 if (!now.Exists || now.Length != info.Length || now.LastWriteTimeUtc != info.LastWriteTimeUtc) throw new IOException("Rollout changed during decompression");
                 var decoded = new Decoded(identity, tempPath, temp, temp.Length);
+                HistoryMetrics.Decoded.Add(1);
                 var read = OpenRead(tempPath); DecodedFiles.AddFirst(decoded);
                 while (DecodedFiles.Count > 2 || DecodedFiles.Count > 1 && DecodedFiles.Sum(v => v.Length) > CacheBudget)
                 { var last = DecodedFiles.Last!; DecodedFiles.RemoveLast(); last.Value.Owner.Dispose(); }

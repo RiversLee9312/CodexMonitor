@@ -55,32 +55,34 @@ public sealed class PagingAndInputUiTests
         var second = window.ReviewUserInputAsync(client, new("item/tool/requestUserInput", question, J("43"))); await MainWindow.SettleAsync();
         await window.ReviewDisconnectTranscriptServer(); await second; Assert.AreEqual(0, server.Sent.Count);
     }
-    [UITestMethod]
-    public async Task LocalHistoryAutomaticallyPrependsOnePageAndKeepsTheVisibleMessage()
+    [UITestMethod, DataRow(false), DataRow(true)]
+    public async Task LocalHistoryAutomaticallyPrependsOnePageAndKeepsTheVisibleMessage(bool compressed)
     {
-        var path = Path.GetTempFileName();
+        var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-pages-" + Guid.NewGuid() + ".jsonl");
         try
         {
             await using (var writer = new StreamWriter(path))
                 for (int i = 0; i < 2400; i++) await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "response_item", payload = new { type = "message", role = i % 2 == 0 ? "user" : "assistant", content = new[] { new { type = "text", text = "Paged message " + i } } } }));
+            if (compressed) await CompressFixture(path);
             var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Dark", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
             Assert.AreEqual(300, window.ReviewLoadedCount); Assert.IsTrue(window.ReviewHasEarlier);
             var anchor = await window.ReviewScrollToEarlierAsync();
             for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30);
-            await MainWindow.SettleAsync(); Assert.AreEqual(600, window.ReviewLoadedCount); Assert.AreEqual(anchor.Y, window.ReviewItemY(anchor.Item), 2);
+            await MainWindow.SettleAsync(); TestContext.WriteLine(window.ReviewHistoryState); Assert.AreEqual(600, window.ReviewLoadedCount); Assert.AreEqual(anchor.Y, window.ReviewItemY(anchor.Item), 2);
             Assert.IsFalse(window.ReviewVisualElements<Button>().Any(b => b.Content is string s && s.Contains("Load earlier", StringComparison.OrdinalIgnoreCase)));
             TestContext.AddResultFile(await window.CaptureReviewAsync("automatic-history-dark"));
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); File.Delete(path + ".zst"); }
     }
-    [UITestMethod]
-    public async Task PagingInsideAToolGroupKeepsTheGroupDisclosureAndNestedAnchor()
+    [UITestMethod, DataRow(false), DataRow(true)]
+    public async Task PagingInsideAToolGroupKeepsTheGroupDisclosureAndNestedAnchor(bool compressed)
     {
-        var path = Path.GetTempFileName();
+        var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-tool-pages-" + Guid.NewGuid() + ".jsonl");
         try
         {
             await using (var writer = new StreamWriter(path))
                 for (int i = 0; i < 1200; i++) await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "response_item", payload = new { type = "function_call", call_id = "c" + i, name = "exec_command", arguments = "{\"cmd\":\"echo " + i + "\"}" } }));
+            if (compressed) await CompressFixture(path);
             var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Light", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
             var disclosure = window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal));
             var anchor = await window.ReviewScrollToolHistoryAsync(); for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30); await MainWindow.SettleAsync();
@@ -88,6 +90,16 @@ public sealed class PagingAndInputUiTests
             var y = ((FrameworkElement)anchor.List.ContainerFromItem(anchor.Item)).TransformToVisual(anchor.List).TransformPoint(new(0, 0)).Y; Assert.AreEqual(anchor.Y, y, 2);
             TestContext.AddResultFile(await window.CaptureReviewAsync("automatic-tool-history-light"));
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); File.Delete(path + ".zst"); }
+    }
+    private static async Task CompressFixture(string path)
+    {
+        await Task.Run(async () =>
+        {
+            await using (var output = File.Create(path + ".zst"))
+            await using (var encoder = new ZstdSharp.CompressionStream(output))
+            await using (var input = File.OpenRead(path)) await input.CopyToAsync(encoder);
+            File.Delete(path);
+        });
     }
 }

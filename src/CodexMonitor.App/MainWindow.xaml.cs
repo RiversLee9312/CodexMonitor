@@ -16,7 +16,7 @@ namespace CodexMonitor.App;
 
 public sealed partial class MainWindow : Window
 {
-    private AppSettings _settings = AppSettings.Load();
+    private AppSettings _settings;
     private LocalizationService _text;
     private LocalSessionStore _store;
     private IServerDiscovery _serverDiscovery = new LocalServerDiscovery();
@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
     private Storyboard? _latestTransition;
     private bool _jumpingLatest;
     private long _latestScrollGeneration;
+    private long _transcriptViewportInput;
     private long _selectedLength = -1;
     private long _transcriptReadGeneration;
     private ServerRead? _serverRead;
@@ -70,6 +71,9 @@ public sealed partial class MainWindow : Window
     private CodexClient? _historyClient;
     private long? _historyStart;
     private bool _hasEarlier, _loadingEarlier, _pagedReview = false;
+    private CancellationTokenSource? _earlierCancellation;
+    private LocalTranscriptPager? _localPager;
+    private string? _localPagerSession;
     private readonly Dictionary<string, string> _activityGroupIdentities = [];
     private double _previousTranscriptOffset;
     private readonly Dictionary<string, TranscriptEntry> _serverEvents = [];
@@ -81,9 +85,12 @@ public sealed partial class MainWindow : Window
     private Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
     private readonly Microsoft.UI.System.ThemeSettings _themeSettings;
 
-    public MainWindow() : this(false) { }
-    internal MainWindow(bool reviewMode)
+    public MainWindow() : this(false, new()) { }
+    public MainWindow(AppSettings settings) : this(false, settings) { }
+    internal MainWindow(bool reviewMode) : this(reviewMode, new()) { }
+    private MainWindow(bool reviewMode, AppSettings settings)
     {
+        _settings = settings;
         _reviewMode = reviewMode;
         _checkResumeState = CheckResumeStateAsync;
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
@@ -106,6 +113,7 @@ public sealed partial class MainWindow : Window
         MessageList.ItemContainerTransitions = [];
         MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
+            ++_transcriptViewportInput;
             _jumpingLatest = false; ++_latestScrollGeneration;
             if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) return;
             _following = false;
@@ -114,7 +122,8 @@ public sealed partial class MainWindow : Window
             RequestEarlier();
         }), true);
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
-        { if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
+        { ++_transcriptViewportInput; if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
+        MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => ++_transcriptViewportInput), true);
         SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.ItemContainerTransitions = _noSessionTransitions;
@@ -122,7 +131,7 @@ public sealed partial class MainWindow : Window
         _timer.Tick += async (_, _) => await RefreshAsync();
         Closed += async (_, _) =>
         {
-            _closing = true; _sessionQueryCancellation?.Cancel(); _sessionReorderTimer?.Stop(); _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel(); _sessionAvailabilityCancellation?.Cancel();
+            _closing = true; CancelEarlierRead(); RetireLocalPager(); _sessionQueryCancellation?.Cancel(); _sessionReorderTimer?.Stop(); _timer.Stop(); _lifetime.Cancel(); _selectionCts?.Cancel(); _sessionAvailabilityCancellation?.Cancel();
             _themeSettings.Changed -= OnSystemThemeChanged;
             if (_client is not null) await _client.DisposeAsync();
         };
@@ -289,7 +298,7 @@ public sealed partial class MainWindow : Window
                 {
                     _selected = updated with { ActiveTurnId = updated.ActiveTurnId ?? (_attached.Contains(updated.Id) && updated.State is SessionState.Active or SessionState.Waiting ? selected.ActiveTurnId : null) };
                     UpdateTitle(); UpdateChrome();
-                    var length = RolloutFiles.Find(updated.FilePath)?.Length ?? -1;
+                    var length = updated.FileVersion?.Length ?? await Task.Run(() => RolloutFiles.Find(updated.FilePath)?.Length ?? -1, _lifetime.Token);
                     if (_client is { IsConnected: true } && _attached.Contains(updated.Id))
                     { if (force) await LoadTranscriptAsync(_selected, false); }
                     else if (!string.IsNullOrEmpty(updated.FilePath) && (length != _selectedLength || force)) await LoadTranscriptAsync(_selected, false);
@@ -410,13 +419,18 @@ public sealed partial class MainWindow : Window
     private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading, IReadOnlyList<RpcMessage>? initialNotifications = null)
     {
         var generation = ++_transcriptReadGeneration;
+        CancelEarlierRead();
+        if (_localPagerSession != session.Id) RetireLocalPager();
         _selectionCts?.Cancel(); _selectionCts?.Dispose();
         var cts = _selectionCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         if (showLoading) { _messages.Clear(); LoadingRing.IsActive = true; LoadingRing.Visibility = Visibility.Visible; }
         try
         {
             TranscriptSnapshot snapshot;
-            var sourceClient = _client is { IsConnected: true } connected && (_attached.Contains(session.Id) || !RolloutFiles.Exists(session.FilePath)) ? connected : null;
+            var connected = _client is { IsConnected: true } current ? current : null;
+            var file = await Task.Run(() => RolloutFiles.Find(session.FilePath), cts.Token);
+            if (_selected?.Id != session.Id || generation != _transcriptReadGeneration || cts.IsCancellationRequested) return;
+            var sourceClient = connected is not null && (_attached.Contains(session.Id) || file is null) ? connected : null;
             ServerRead? reading = null; ServerTranscript? serverSnapshot = null;
             if (sourceClient is not null)
             {
@@ -427,14 +441,14 @@ public sealed partial class MainWindow : Window
                 if (!ReferenceEquals(sourceClient, _client) || !sourceClient.IsConnected || generation != _transcriptReadGeneration || _selected?.Id != session.Id) return;
                 if (!sameSource) { ResetHistory(session.Id, sourceClient); _historyCursor = serverSnapshot.NextCursor; _hasEarlier = _historyCursor is not null; }
             }
-            else if (RolloutFiles.Exists(session.FilePath))
+            else if (file is not null)
             {
-                var initialLength = RolloutFiles.Find(session.FilePath)?.Length ?? -1;
+                var initialLength = file.Length;
                 LocalTranscriptPage? localPage = null;
                 if (!_reviewMode || _pagedReview)
                 {
                     var start = _historySessionId == session.Id && _historyClient is null ? _historyStart : null;
-                    localPage = await Task.Run(() => new LocalTranscriptPager().ReadAsync(session, start, ct: cts.Token), cts.Token);
+                    localPage = await GetLocalPager(session.Id).ReadAsync(session, start, ct: cts.Token);
                     snapshot = localPage.Snapshot;
                 }
                 else snapshot = await Task.Run(() => _readLocalTranscript(session, cts.Token), cts.Token);
@@ -474,10 +488,11 @@ public sealed partial class MainWindow : Window
             reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier);
         if (reset) _messages.Clear();
         var anchor = !_following && !reset ? ScrollAnchor.Capture(MessageList) : null;
+        var viewportInput = _transcriptViewportInput; var sourceGeneration = _transcriptReadGeneration;
         for (int i = 0; i < _messages.Count; i++)
             if (MessageList.ContainerFromIndex(i) is DependencyObject container) TranscriptCard.PreserveScroll(container, _messages[i]);
         EntryRows.Synchronize(_messages, rows);
-        anchor?.Restore();
+        anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -493,7 +508,7 @@ public sealed partial class MainWindow : Window
     }
     private void RequestEarlier()
     {
-        if (!_hasEarlier || _loadingEarlier || _serverRead is not null || _snapshot is null || _messageScroll is { VerticalOffset: > 200 }) return;
+        if (!_hasEarlier || _loadingEarlier || _serverRead is not null || _snapshot is null || _messageScroll is { } scroll && scroll.VerticalOffset > Math.Max(200, scroll.ViewportHeight * 2)) return;
         _following = false; _jumpingLatest = false; ++_latestScrollGeneration; _ = LoadEarlierAsync();
     }
     private async Task LoadEarlierAsync()
@@ -501,26 +516,41 @@ public sealed partial class MainWindow : Window
         if (_selected is not { } session || _loadingEarlier || !_hasEarlier) return;
         _loadingEarlier = true; EarlierRing.IsActive = true; EarlierRing.Visibility = Visibility.Visible;
         var generation = _transcriptReadGeneration; var client = _historyClient;
+        var start = _historyStart; var cursor = _historyCursor;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_selectionCts?.Token ?? _lifetime.Token);
+        _earlierCancellation = cancellation;
+        var ct = cancellation.Token;
         try
         {
             if (client is not null)
             {
-                var page = await client.ReadTranscriptPageAsync(session.Id, _historyCursor, _lifetime.Token);
-                if (generation != _transcriptReadGeneration || _selected?.Id != session.Id || !ReferenceEquals(client, _historyClient) || !client.IsConnected) return;
+                var page = await client.ReadTranscriptPageAsync(session.Id, cursor, ct);
+                if (ct.IsCancellationRequested || generation != _transcriptReadGeneration || _selected?.Id != session.Id || !ReferenceEquals(client, _historyClient) || !client.IsConnected) return;
                 _snapshot = _snapshot! with { Entries = ServerTranscript.Merge(_snapshot!.Entries, page.Entries, true) };
                 _historyCursor = page.NextCursor; _hasEarlier = page.NextCursor is not null;
             }
             else
             {
-                var page = await Task.Run(() => new LocalTranscriptPager().ReadAsync(session, _historyStart, older: true, ct: _lifetime.Token));
-                if (generation != _transcriptReadGeneration || _selected?.Id != session.Id || _historyClient is not null) return;
+                var page = await GetLocalPager(session.Id).ReadAsync(session, start, older: true, ct: ct);
+                if (ct.IsCancellationRequested || generation != _transcriptReadGeneration || _selected?.Id != session.Id || _historyClient is not null) return;
                 _historyStart = page.StartOffset; _hasEarlier = page.HasEarlier; _snapshot = page.Snapshot;
             }
             RenderMessages();
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException or OperationCanceledException) { }
-        finally { _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
+        catch (OperationCanceledException) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException)
+        { if (!ct.IsCancellationRequested && generation == _transcriptReadGeneration && _selected?.Id == session.Id) NoticeText("ReadFailed", InfoBarSeverity.Warning); }
+        finally { if (ReferenceEquals(_earlierCancellation, cancellation)) { _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; } }
     }
+    private LocalTranscriptPager GetLocalPager(string sessionId)
+    {
+        if (_localPagerSession != sessionId) RetireLocalPager();
+        _localPagerSession = sessionId; return _localPager ??= new(retainSnapshot: true);
+    }
+    private void RetireLocalPager()
+    { if (_localPager is { } old) { _localPager = null; _localPagerSession = null; _ = old.DisposeAsync(); } }
+    private void CancelEarlierRead()
+    { _earlierCancellation?.Cancel(); _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
     private void UpdateTitle()
     {
         SessionTitle.Text = _selected is null ? _text["Transcript"] : new SessionRow(_selected, _text).Title;
@@ -608,7 +638,7 @@ public sealed partial class MainWindow : Window
             }
             _connectionEndpoint = _settings.UseSharedServer ? _settings.Endpoint : null;
             Notice.IsOpen = false; await RefreshAsync(true);
-            if (wasConnected && _selected is { } localSession && RolloutFiles.Exists(localSession.FilePath)) await LoadTranscriptAsync(localSession, false);
+            if (wasConnected && _selected is { FilePath.Length: > 0 } localSession) await LoadTranscriptAsync(localSession, false);
         }
         catch (FileNotFoundException) when (!_settings.UseSharedServer)
         { await ShowCliSetupAsync(); }
@@ -682,12 +712,12 @@ public sealed partial class MainWindow : Window
             if (!_closing && ReferenceEquals(_client, client))
             {
                 _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
-                if (_selected is { } session && RolloutFiles.Exists(session.FilePath)) await LoadTranscriptAsync(session, false);
+                if (_selected is { FilePath.Length: > 0 } session) await LoadTranscriptAsync(session, false);
             }
         });
     }
     private void InvalidateTranscriptRead()
-    { ++_transcriptReadGeneration; _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
+    { ++_transcriptReadGeneration; CancelEarlierRead(); RetireLocalPager(); _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;
@@ -968,10 +998,11 @@ public sealed partial class MainWindow : Window
     }
     private void OnTranscriptViewChanged(object? sender, ScrollViewerViewChangedEventArgs args)
     {
-        if (args.IsIntermediate || _messageScroll is null || _jumpingLatest) return;
+        if (args.IsIntermediate) { ++_transcriptViewportInput; return; }
+        if (_messageScroll is null || _jumpingLatest) return;
         _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
         SetLatestVisible(!_following);
-        if (_messageScroll.VerticalOffset < _previousTranscriptOffset && _messageScroll.VerticalOffset < 200) RequestEarlier();
+        if (_messageScroll.VerticalOffset < _previousTranscriptOffset && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
         _previousTranscriptOffset = _messageScroll.VerticalOffset;
     }
     private void SetLatestVisible(bool visible)
@@ -1080,13 +1111,13 @@ public sealed partial class MainWindow : Window
             var picker = new FileSavePicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, SuggestedFileName = "codex-" + snapshot.Session.Id };
             WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             picker.FileTypeChoices.Add(_text["TextFiles"], new List<string> { ".md" });
-            if (await picker.PickSaveFileAsync() is { } file) { await File.WriteAllTextAsync(file.Path, TranscriptExport.Markdown(snapshot, _text)); NoticeText("Exported", InfoBarSeverity.Success); }
+            if (await picker.PickSaveFileAsync() is { } file) { var text = _text; var markdown = await Task.Run(() => TranscriptExport.Markdown(snapshot, text)); await File.WriteAllTextAsync(file.Path, markdown); NoticeText("Exported", InfoBarSeverity.Success); }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException) { NoticeText("ReadFailed", InfoBarSeverity.Error); }
     }
     private async void OnOpenFolder(object sender, RoutedEventArgs e)
     {
-        if (_selected?.Cwd is { Length: > 0 } folder && Directory.Exists(folder))
+        if (_selected?.Cwd is { Length: > 0 } folder && await Task.Run(() => Directory.Exists(folder)))
         { try { await Launcher.LaunchFolderPathAsync(folder); } catch (Exception ex) when (ex is IOException or System.Runtime.InteropServices.COMException) { NoticeText("ReadFailed", InfoBarSeverity.Error); } }
     }
     private async Task<string?> PickFolderAsync()
@@ -1102,7 +1133,8 @@ public sealed partial class MainWindow : Window
         var browse = new Button { Content = _text["Browse"] }; browse.Click += async (_, _) => { if (await PickFolderAsync() is { } selected) path.Text = selected; };
         var panel = new StackPanel { Spacing = 12 }; panel.Children.Add(path); panel.Children.Add(browse);
         if (await ShowDialogAsync(new ContentDialog { Title = _text["NewSessionTitle"], Content = panel, PrimaryButtonText = _text["Start"], CloseButtonText = _text["Cancel"], DefaultButton = ContentDialogButton.Primary }) != ContentDialogResult.Primary) return;
-        if (!Directory.Exists(path.Text)) { NoticeText("InvalidHome", InfoBarSeverity.Error); return; }
+        var selectedPath = path.Text;
+        if (!await Task.Run(() => Directory.Exists(selectedPath))) { NoticeText("InvalidHome", InfoBarSeverity.Error); return; }
         if (_client is not { IsConnected: true }) await ConnectAsync();
         if (_client is not { IsConnected: true } client) return;
         try
@@ -1148,7 +1180,7 @@ public sealed partial class MainWindow : Window
         if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary)
         {
             _settings = _settings with { Executable = setup.Executable };
-            try { _settings.Save(); NoticeText("Saved", InfoBarSeverity.Success); }
+            try { await _settings.SaveAsync(); NoticeText("Saved", InfoBarSeverity.Success); }
             catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); }
         }
         await CheckCliWelcomeAsync();
@@ -1214,7 +1246,7 @@ public sealed partial class MainWindow : Window
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         var changedConnection = home.Home != _settings.CodexHome || exe.Executable != _settings.Executable || discovery.Endpoint != _settings.Endpoint || (mode.SelectedIndex == 1) != _settings.UseSharedServer;
         _settings = _settings with { CodexHome = Path.GetFullPath(home.Home), Executable = exe.Executable, UseSharedServer = mode.SelectedIndex == 1, Endpoint = discovery.Endpoint, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex] };
-        try { _settings.Save(); }
+        try { await _settings.SaveAsync(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
         _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json")); _sessionCatalog = null; _knownLocalSessionIds = null; _text = new(_settings.Language);
         if (changedConnection) { _sessionAvailabilityCancellation?.Cancel(); _sessionServerCheckedAt.Clear(); _sessionConnectionFailures.Clear(); }

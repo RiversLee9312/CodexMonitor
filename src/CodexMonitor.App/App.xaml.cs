@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using CodexMonitor.Core;
 
 namespace CodexMonitor.App;
 
@@ -17,9 +18,16 @@ public partial class App : Application
     }
     private static void RecordDiagnostic(string message)
     {
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexMonitor");
-        Directory.CreateDirectory(folder);
-        File.AppendAllText(Path.Combine(folder, "crash.log"), $"{DateTimeOffset.UtcNow:O} {message}\n");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexMonitor");
+                Directory.CreateDirectory(folder);
+                await File.AppendAllTextAsync(Path.Combine(folder, "crash.log"), $"{DateTimeOffset.UtcNow:O} {message}\n");
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        });
     }
-    protected override void OnLaunched(LaunchActivatedEventArgs args) { Window = new MainWindow(); Window.Activate(); }
+    protected override async void OnLaunched(LaunchActivatedEventArgs args) { var settings = await AppSettings.LoadAsync(); Window = new MainWindow(settings); Window.Activate(); }
 }

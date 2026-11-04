@@ -65,7 +65,8 @@ internal sealed partial class HomeDiscoveryPanel : StackPanel, IDisposable
             _choices.Visibility = found.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
             _status.Text = _text["NoHomesFound"]; _status.Visibility = found.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             // Discovery may fill a missing path, but never replace a valid choice or ongoing edits.
-            if (Home == original && !Directory.Exists(original) && found.Count == 1) Home = found[0];
+            var exists = await Task.Run(() => Directory.Exists(original), scan.Token);
+            if (!scan.IsCancellationRequested && Home == original && !exists && found.Count == 1) Home = found[0];
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException)

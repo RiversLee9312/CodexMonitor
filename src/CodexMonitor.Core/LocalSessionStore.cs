@@ -14,7 +14,8 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
     public static string DefaultHome => Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } h ? h :
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
 
-    public async Task<IReadOnlyList<SessionInfo>> ListAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SessionInfo>> ListAsync(CancellationToken ct = default) => Task.Run(() => ListCoreAsync(ct), ct);
+    private async Task<IReadOnlyList<SessionInfo>> ListCoreAsync(CancellationToken ct)
     {
         await _scan.WaitAsync(ct).ConfigureAwait(false);
         try

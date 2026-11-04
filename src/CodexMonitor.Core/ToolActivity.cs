@@ -91,7 +91,10 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         value = Regex.Replace(value, @"\s+", " ").Trim();
         return value.Length > 180 ? value[..180] + "…" : value;
     }
-    public IReadOnlyList<ToolActivity> DisplayParts()
+    private sealed record PartProjection(IReadOnlyList<ToolActivity> Value);
+    private static readonly ConditionalWeakTable<ToolActivity, PartProjection> Parts = new();
+    public IReadOnlyList<ToolActivity> DisplayParts() => Parts.GetValue(this, static tool => new(tool.BuildDisplayParts())).Value;
+    private IReadOnlyList<ToolActivity> BuildDisplayParts()
     {
         if (CategoryKey != "ToolFileChanges") return [this];
         var value = DecodedInput; var edits = new List<(string Path, string Diff)>();

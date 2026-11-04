@@ -8,9 +8,15 @@ namespace CodexMonitor.Core;
 public sealed class TranscriptParser
 {
     public Task<TranscriptSnapshot> ReadAsync(SessionInfo session, CancellationToken ct = default) => ReadRangeAsync(session, 0, null, ct);
-    public async Task<TranscriptSnapshot> ReadRangeAsync(SessionInfo session, long startOffset, long? endOffset = null, CancellationToken ct = default)
+    public Task<TranscriptSnapshot> ReadRangeAsync(SessionInfo session, long startOffset, long? endOffset = null, CancellationToken ct = default) => Task.Run(async () =>
     {
         await using var stream = await RolloutFiles.OpenSeekableAsync(session.FilePath, ct);
+        return await ReadStreamAsync(session, stream, startOffset, endOffset, ct).ConfigureAwait(false);
+    }, ct);
+    internal async Task<TranscriptSnapshot> ReadStreamAsync(SessionInfo session, FileStream stream, long startOffset, long? endOffset, CancellationToken ct)
+    {
+        HistoryMetrics.ParseBytes.Add((endOffset ?? stream.Length) - startOffset);
+        HistoryMetrics.Parsing.Add(1);
         stream.Position = startOffset;
         var reader = new Utf8RecordReader(stream, startOffset, endOffset ?? stream.Length);
         var entries = new List<TranscriptEntry>();
@@ -208,6 +214,7 @@ public sealed class TranscriptParser
             entries.Add(candidate);
         }
         session = session with { State = state, ActiveTurnId = turnId ?? (startOffset > 0 && state is SessionState.RecordedActive or SessionState.Active or SessionState.Waiting ? session.ActiveTurnId : null) };
+        foreach (var entry in entries) { ct.ThrowIfCancellationRequested(); if (entry.Tool is { CategoryKey: "ToolFileChanges" } tool) _ = tool.DisplayParts(); }
         return new(session, entries.OrderBy(e => e.Timestamp).ToArray(), invalid, unknown, tokens);
     }
     private static string MirrorKey(TranscriptEntry entry)

@@ -16,13 +16,14 @@ internal sealed record ScrollAnchor(ListView List, object Item, double Y)
             }
         return null;
     }
-    internal void Restore()
+    internal void Restore(Func<bool>? stillValid = null)
     {
-        if (!List.Items.Contains(Item) || !List.IsLoaded) return;
+        if (stillValid?.Invoke() == false || !List.Items.Contains(Item) || !List.IsLoaded) return;
         List.UpdateLayout();
         if (List.ContainerFromItem(Item) is not FrameworkElement) { List.ScrollIntoView(Item, ScrollIntoViewAlignment.Leading); List.UpdateLayout(); }
-        Adjust();
-        List.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Adjust);
+        AdjustIfValid();
+        List.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, AdjustIfValid);
+        void AdjustIfValid() { if (stillValid?.Invoke() != false) Adjust(); }
     }
     private void Adjust()
     {

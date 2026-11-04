@@ -250,9 +250,11 @@ public sealed partial class MainWindow
     internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
     internal bool ReviewHasEarlier => _hasEarlier;
     internal bool ReviewLoadingEarlier => _loadingEarlier;
+    internal Task ReviewLoadEarlierAsync() => LoadEarlierAsync();
+    internal string ReviewHistoryState => $"loaded={ReviewLoadedCount}, earlier={_hasEarlier}, loading={_loadingEarlier}, offset={_messageScroll?.VerticalOffset}, start={_historyStart}, latest={_jumpingLatest}, notice={(Notice.IsOpen ? Notice.Message : "")}";
     internal async Task<(object Item, double Y)> ReviewScrollToEarlierAsync()
     {
-        TrackTranscriptScroll(); _loadingEarlier = true; _following = false;
+        TrackTranscriptScroll(); _loadingEarlier = true; _following = false; _jumpingLatest = false; ++_latestScrollGeneration;
         _messageScroll!.ChangeView(null, 150, null, true); await SettleAsync();
         var anchor = ScrollAnchor.Capture(MessageList)!; _loadingEarlier = false;
         // This is the same upward gesture entry point used by pointer wheel and keyboard input.

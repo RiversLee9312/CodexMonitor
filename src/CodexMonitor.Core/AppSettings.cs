@@ -17,6 +17,29 @@ public sealed record AppSettings
         try { return JsonSerializer.Deserialize(File.ReadAllText(SettingsPath), CoreJsonContext.Default.AppSettings) ?? new(); }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
     }
+    public static Task<AppSettings> LoadAsync() => Task.Run(async () =>
+    {
+        try
+        {
+            await using var stream = new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, FileOptions.Asynchronous);
+            return await JsonSerializer.DeserializeAsync(stream, CoreJsonContext.Default.AppSettings).ConfigureAwait(false) ?? new();
+        }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return new(); }
+    });
+    private static readonly SemaphoreSlim Writes = new(1);
+    public Task SaveAsync() => Task.Run(async () =>
+    {
+        await Writes.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+            var temp = SettingsPath + ".tmp";
+            await using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
+                await JsonSerializer.SerializeAsync(stream, this, CoreJsonContext.Default.AppSettings).ConfigureAwait(false);
+            File.Move(temp, SettingsPath, true);
+        }
+        finally { Writes.Release(); }
+    });
     public void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
