@@ -42,17 +42,29 @@ public sealed partial class LocalSessionStore(string home)
                         UpdatedAt = file.LastWriteTimeUtc, CreatedAt = file.CreationTimeUtc, FileVersion = new(file.Length, file.LastWriteTimeUtc),
                         IsArchived = Path.GetRelativePath(Home, path).StartsWith("archived_sessions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) };
                     await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
-                    using var reader = new StreamReader(stream);
-                    if (await reader.ReadLineAsync(token) is { } first)
+                    // Metadata and recent lifecycle markers never require scanning a multi-gigabyte rollout.
+                    const int headBytes = 256 * 1024, tailBytes = 1024 * 1024;
+                    var length = stream.Length;
+                    var ranges = length <= headBytes + tailBytes ? new[] { (Start: 0L, End: length) } : new[] { (Start: 0L, End: (long)headBytes), (Start: length - tailBytes, End: length) };
+                    foreach (var range in ranges)
                     {
-                        try { using var d = JsonDocument.Parse(first); if (d.RootElement.Str("type") == "session_meta") info = TranscriptParser.Metadata(info, d.RootElement.Field("payload")); }
-                        catch (JsonException) { }
-                    }
-                    // Scan lifecycle markers on the first read so long turns cannot disappear from the active filter.
-                    // Unchanged files use the metadata cache; irrelevant large tool output lines need no JSON parsing.
-                    stream.Seek(0, SeekOrigin.Begin); reader.DiscardBufferedData();
-                    while (await reader.ReadLineAsync(token) is { } line)
-                    {
+                        stream.Position = range.Start;
+                        var records = new Utf8RecordReader(stream, range.Start, range.End);
+                        if (range.Start > 0)
+                        {
+                            // Discard a leading fragment; the next record starts at an exact UTF-8 line boundary.
+                            stream.Position = range.Start - 1; var previous = stream.ReadByte(); stream.Position = range.Start;
+                            if (previous != '\n') await records.ReadAsync(token);
+                            info = info with { State = SessionState.Unknown, ActiveTurnId = null };
+                        }
+                        while (await records.ReadAsync(token) is { } record)
+                        {
+                            var line = record.Text;
+                            if (record.Offset == 0)
+                            {
+                                try { using var meta = JsonDocument.Parse(line); if (meta.RootElement.Str("type") == "session_meta") info = TranscriptParser.Metadata(info, meta.RootElement.Field("payload")); }
+                                catch (JsonException) { }
+                            }
                         if (!line.Contains("task_started", StringComparison.Ordinal) && !line.Contains("task_complete", StringComparison.Ordinal)
                             && !line.Contains("turn_started", StringComparison.Ordinal) && !line.Contains("turn_complete", StringComparison.Ordinal)
                             && !line.Contains("turn_aborted", StringComparison.Ordinal) && !line.Contains("task_interrupted", StringComparison.Ordinal)
@@ -76,6 +88,7 @@ public sealed partial class LocalSessionStore(string home)
                             };
                         }
                         catch (JsonException) { }
+                        }
                     }
                     _cache[path] = (file.Length, file.LastWriteTimeUtc, info);
                 }

@@ -35,8 +35,8 @@ public sealed class ComposerStateUiTests
         await window.CheckSessionAvailabilityReviewAsync();
         Assert.AreEqual(resume, window.ReviewResumeButtonVisible); Assert.AreEqual(!resume, window.ReviewConnectionButtonVisible);
         Assert.IsFalse(window.ReviewComposerVisible);
-        foreach (var (name, rect) in window.ReviewBounds()) Assert.IsTrue(rect.Bottom <= window.ReviewRoot.ActualHeight + 1 && rect.Right <= window.ReviewRoot.ActualWidth + 1, name);
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-action-560-" + state + "-" + live + "-" + language));
+        foreach (var (name, rect) in window.ReviewBounds()) Assert.IsTrue(rect.Bottom <= window.ReviewRoot.ActualHeight + 1 && rect.Right <= window.ReviewRoot.ActualWidth + 1, $"{name}: {rect}; root={window.ReviewRoot.ActualWidth}x{window.ReviewRoot.ActualHeight}");
     }
     [UITestMethod]
     public async Task ResumeRechecksFreshStateBeforeOpeningAnyServer()

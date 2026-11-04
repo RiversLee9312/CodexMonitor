@@ -258,5 +258,17 @@
   "EventSession": "Aktualizacja sesji",
   "EventRealtime": "Sesja w czasie rzeczywistym",
   "EventConfiguration": "Aktualizacja konfiguracji",
-  "EventConnection": "Aktualizacja połączenia"
+  "EventConnection": "Aktualizacja połączenia",
+  "ActivityGroup": "Aktywność",
+  "ActivityGroupHelp": "Zwiń lub rozwiń tę grupę aktywności.",
+  "Working": "Pracuje",
+  "IncompleteActivity": "Niedokończona aktywność",
+  "ReconnectSession": "Połącz ponownie",
+  "ReconnectSessionExplanation": "Informacje o turze są niedostępne. Połącz się ponownie, aby wczytać bieżący stan i transkrypcję oraz móc wysyłać wiadomości lub kierować obecną turą.",
+  "UserInputTitle": "Potrzebujemy Twojej odpowiedzi",
+  "UserInputHint": "Codex będzie kontynuować tę rozmowę po otrzymaniu odpowiedzi.",
+  "SubmitAnswers": "Prześlij odpowiedzi",
+  "OtherAnswer": "Inna odpowiedź",
+  "AnswerPlaceholder": "Wpisz odpowiedź",
+  "LoadingEarlier": "Wczytywanie wcześniejszej zawartości…"
 }

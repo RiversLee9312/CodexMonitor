@@ -5,12 +5,15 @@ namespace CodexMonitor.Core;
 /// <summary>One reducer for live events and recorded event envelopes. Final items replace streamed drafts.</summary>
 public static class TranscriptUpdates
 {
-    public static IReadOnlyList<TranscriptEntry> Apply(IReadOnlyList<TranscriptEntry> before, string method, JsonElement p, DateTimeOffset time = default)
+    public static IReadOnlyList<TranscriptEntry> Apply(IReadOnlyList<TranscriptEntry> before, string method, JsonElement p, DateTimeOffset time = default, string? model = null, string? turnId = null)
     {
+        if (method.StartsWith("response.", StringComparison.Ordinal)) return ResponseStream.Apply(before, method, p, time, model, turnId);
         var entries = before.ToList(); var changed = false;
         void Upsert(TranscriptEntry entry)
         {
             var index = entries.FindIndex(e => e.Id == entry.Id);
+            entry = entry with { TurnId = entry.TurnId ?? (index >= 0 ? entries[index].TurnId : null) ?? p.Str("turnId", p.Field("turn").Str("id", turnId ?? "")),
+                Model = entry.Model ?? (p.Field("item").Str("model") is { Length: > 0 } actualModel ? actualModel : null) ?? (index >= 0 ? entries[index].Model : null) ?? (entry.Kind == EntryKind.Assistant && entry.Text.Length == 0 ? null : model) };
             if (index >= 0 && entry.Tool is { } incoming && entries[index].Tool?.StandardInput is { } stdin) entry = entry with { Tool = incoming with { StandardInput = stdin } };
             if (index < 0) entries.Add(entry); else entries[index] = entry with { Timestamp = entries[index].Timestamp };
             changed = true;
@@ -82,6 +85,7 @@ public static class TranscriptUpdates
                 RealtimeText(p, method.EndsWith("/done", StringComparison.Ordinal)); break;
         }
         if (!method.StartsWith("legacy/", StringComparison.Ordinal) && TranscriptEvents.Parse(method, p, time) is { } activity) Upsert(activity);
+        if (method == "turn/completed") changed |= entries.RemoveAll(e => e.Tool?.State == ToolActivityState.Generating && (turnId is null || e.TurnId == turnId)) > 0;
         if (method == "turn/completed" && p.Field("turn").Str("status") is "interrupted" or "failed")
         {
             for (int i = 0; i < entries.Count; i++) if (entries[i].Tool is { State: ToolActivityState.Running } running)

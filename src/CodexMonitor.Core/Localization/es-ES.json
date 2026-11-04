@@ -258,5 +258,17 @@
   "EventSession": "Actualización de sesión",
   "EventRealtime": "Sesión en tiempo real",
   "EventConfiguration": "Actualización de configuración",
-  "EventConnection": "Actualización de conexión"
+  "EventConnection": "Actualización de conexión",
+  "ActivityGroup": "Actividad",
+  "ActivityGroupHelp": "Contraer o expandir este grupo de actividades.",
+  "Working": "Trabajando",
+  "IncompleteActivity": "Actividad sin terminar",
+  "ReconnectSession": "Volver a conectar",
+  "ReconnectSessionExplanation": "No hay información del turno. Vuelve a conectarte para cargar de nuevo el estado en tiempo real y la transcripción, y así poder enviar mensajes o dirigir el turno actual.",
+  "UserInputTitle": "Se necesita tu respuesta",
+  "UserInputHint": "Codex continuará esta sesión cuando respondas.",
+  "SubmitAnswers": "Enviar respuestas",
+  "OtherAnswer": "Otra respuesta",
+  "AnswerPlaceholder": "Escribe tu respuesta",
+  "LoadingEarlier": "Cargando contenido anterior…"
 }

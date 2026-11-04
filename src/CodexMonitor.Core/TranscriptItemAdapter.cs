@@ -122,6 +122,17 @@ public static class TranscriptItemAdapter
                 return new(id, EntryKind.Event, message, time, type, Tool: new(type, input, State: ToolActivityState.Completed, SummaryOverride: item.Str("author") + " → " + item.Str("recipient"), CategoryOverride: "AgentMessage"));
             case "function_call_output": case "custom_tool_call_output": case "multi_agent_call_output":
                 return new(id, EntryKind.Tool, item.Field("output").ValueKind == JsonValueKind.Array ? PlainText(item.Field("output")) : item.Field("output").TextValue(), time, type);
+            case "mcp_call":
+                return Tool(ToolActivity.FromCall("mcp__" + item.Str("server_label") + "__" + item.Str("name"), item.Str("arguments"), item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? item.Field("error").TextValue() : item.Field("output").TextValue(),
+                    item.Field("error").ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? ToolActivityState.Failed : ToolActivityState.Completed, transportCategory: "ToolMcp", transportSummary: item.Str("server_label") + " · " + item.Str("name")));
+            case "file_search_call":
+                return Tool(new(type, item.Field("queries").TextValue(), item.Field("results").TextValue(), ToolActivityState.Completed, SummaryOverride: string.Join(" · ", item.Field("queries").Items().Select(q => q.TextValue())), CategoryOverride: "ToolSearch"));
+            case "code_interpreter_call":
+                return Tool(new(type, item.Str("code"), string.Join("\n", item.Field("outputs").Items().Where(o => o.Str("type") == "logs").Select(o => o.Str("logs"))), ToolActivityState.Completed, CategoryOverride: "ToolCommand"));
+            case "program":
+                return Tool(ToolActivity.FromCall("program", item.Str("code"), state: ToolActivityState.Unknown));
+            case "program_output":
+                return Tool(new(type, "", item.Field("result").TextValue(), item.Str("status") == "completed" ? ToolActivityState.Completed : ToolActivityState.Unknown, SummaryOverride: "", CategoryOverride: "ToolReadOutput"));
             case "local_shell_call":
                 var action = item.Field("action");
                 return Tool(ToolActivity.FromCall("shell", string.Join(" ", action.Field("command").Items().Select(x => x.TextValue()))));

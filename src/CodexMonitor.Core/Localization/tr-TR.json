@@ -258,5 +258,17 @@
   "EventSession": "Oturum güncellemesi",
   "EventRealtime": "Gerçek zamanlı oturum",
   "EventConfiguration": "Yapılandırma güncellemesi",
-  "EventConnection": "Bağlantı güncellemesi"
+  "EventConnection": "Bağlantı güncellemesi",
+  "ActivityGroup": "Etkinlik",
+  "ActivityGroupHelp": "Bu etkinlik grubunu daraltın veya genişletin.",
+  "Working": "Çalışıyor",
+  "IncompleteActivity": "Tamamlanmamış etkinlik",
+  "ReconnectSession": "Yeniden bağlan",
+  "ReconnectSessionExplanation": "Tur bilgisi kullanılamıyor. Canlı durumu ve dökümü yeniden yükleyip mesaj göndermek veya geçerli turu yönlendirmek için yeniden bağlanın.",
+  "UserInputTitle": "Yanıtınız gerekiyor",
+  "UserInputHint": "Yanıt verdikten sonra Codex bu konuşmayı sürdürecek.",
+  "SubmitAnswers": "Yanıtları gönder",
+  "OtherAnswer": "Diğer yanıt",
+  "AnswerPlaceholder": "Yanıtınızı girin",
+  "LoadingEarlier": "Önceki içerik yükleniyor…"
 }

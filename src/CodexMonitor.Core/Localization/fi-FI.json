@@ -258,5 +258,17 @@
   "EventSession": "Istunnon päivitys",
   "EventRealtime": "Reaaliaikainen istunto",
   "EventConfiguration": "Asetusten päivitys",
-  "EventConnection": "Yhteyden päivitys"
+  "EventConnection": "Yhteyden päivitys",
+  "ActivityGroup": "Toiminta",
+  "ActivityGroupHelp": "Kutista tai laajenna tämä toimintoryhmä.",
+  "Working": "Työskentelee",
+  "IncompleteActivity": "Keskeneräinen toiminto",
+  "ReconnectSession": "Yhdistä uudelleen",
+  "ReconnectSessionExplanation": "Vuoron tiedot eivät ole saatavilla. Yhdistä uudelleen ladataksesi reaaliaikaisen tilan ja keskustelulokin, jotta voit lähettää viestejä tai ohjata nykyistä vuoroa.",
+  "UserInputTitle": "Vastaustasi tarvitaan",
+  "UserInputHint": "Codex jatkaa tätä istuntoa vastauksesi jälkeen.",
+  "SubmitAnswers": "Lähetä vastaukset",
+  "OtherAnswer": "Muu vastaus",
+  "AnswerPlaceholder": "Kirjoita vastauksesi",
+  "LoadingEarlier": "Ladataan aiempaa sisältöä…"
 }

@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace CodexMonitor.Core;
 
-public enum ToolActivityState { Unknown, Running, Completed, Failed, Interrupted }
+public enum ToolActivityState { Unknown, Running, Completed, Failed, Interrupted, Generating }
 public sealed record ToolActivity(string Name, string Input, string? Output = null, ToolActivityState State = ToolActivityState.Running,
     long? DurationMs = null, string? SummaryOverride = null, string? CategoryOverride = null, int? AddedLines = null, int? RemovedLines = null,
     string? Progress = null, string? StandardInput = null, string? DisplayOutput = null, IReadOnlyList<ToolActivity>? DisplayCalls = null)

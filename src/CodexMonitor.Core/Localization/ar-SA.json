@@ -258,5 +258,17 @@
   "EventSession": "تحديث الجلسة",
   "EventRealtime": "جلسة مباشرة",
   "EventConfiguration": "تحديث الإعدادات",
-  "EventConnection": "تحديث الاتصال"
+  "EventConnection": "تحديث الاتصال",
+  "ActivityGroup": "نشاط الأدوات",
+  "ActivityGroupHelp": "طيّ مجموعة الأنشطة هذه أو توسيعها.",
+  "Working": "جارٍ العمل",
+  "IncompleteActivity": "نشاط غير مكتمل",
+  "ReconnectSession": "إعادة الاتصال",
+  "ReconnectSessionExplanation": "معلومات الدور غير متاحة. أعد الاتصال لإعادة تحميل الحالة المباشرة وسجل المحادثة، كي تتمكن من إرسال الرسائل أو توجيه الدور الحالي.",
+  "UserInputTitle": "نحتاج إلى إجابتك",
+  "UserInputHint": "سيتابع Codex هذه المحادثة بعد ردك.",
+  "SubmitAnswers": "إرسال الإجابات",
+  "OtherAnswer": "إجابة أخرى",
+  "AnswerPlaceholder": "اكتب إجابتك",
+  "LoadingEarlier": "جارٍ تحميل محتوى أقدم…"
 }

@@ -258,5 +258,17 @@
   "EventSession": "עדכון סשן",
   "EventRealtime": "סשן בזמן אמת",
   "EventConfiguration": "עדכון תצורה",
-  "EventConnection": "עדכון חיבור"
+  "EventConnection": "עדכון חיבור",
+  "ActivityGroup": "פעילות",
+  "ActivityGroupHelp": "כיווץ או הרחבה של קבוצת הפעילות הזו.",
+  "Working": "בעבודה",
+  "IncompleteActivity": "פעילות שלא הושלמה",
+  "ReconnectSession": "התחברו מחדש",
+  "ReconnectSessionExplanation": "פרטי התור אינם זמינים. התחברו מחדש כדי לטעון שוב את המצב בזמן אמת ואת התמליל, ולשלוח הודעות או לכוון את התור הנוכחי.",
+  "UserInputTitle": "נדרשת תשובתכם",
+  "UserInputHint": "Codex ימשיך בשיחה לאחר שתענו.",
+  "SubmitAnswers": "שליחת התשובות",
+  "OtherAnswer": "תשובה אחרת",
+  "AnswerPlaceholder": "הקלידו את תשובתכם",
+  "LoadingEarlier": "טוענים תוכן קודם…"
 }

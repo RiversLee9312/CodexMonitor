@@ -48,6 +48,8 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _attached = [];
     private readonly SemaphoreSlim _refreshLock = new(1);
     private readonly SemaphoreSlim _dialogs = new(1);
+    private readonly Dictionary<(CodexClient Client, string Id), PendingInput> _pendingInputs = [];
+    private sealed record PendingInput(CodexClient Client, UserInputRequest Request, CancellationTokenSource Cancellation);
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _selectionCts;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _timer;
@@ -59,9 +61,17 @@ public sealed partial class MainWindow : Window
     private bool _readingActivityHistory;
     private bool _latestVisible;
     private Storyboard? _latestTransition;
+    private bool _jumpingLatest;
+    private long _latestScrollGeneration;
     private long _selectedLength = -1;
     private long _transcriptReadGeneration;
     private ServerRead? _serverRead;
+    private string? _historySessionId, _historyCursor;
+    private CodexClient? _historyClient;
+    private long? _historyStart;
+    private bool _hasEarlier, _loadingEarlier, _pagedReview = false;
+    private readonly Dictionary<string, string> _activityGroupIdentities = [];
+    private double _previousTranscriptOffset;
     private readonly Dictionary<string, TranscriptEntry> _serverEvents = [];
     private long _sessionAnchorGeneration, _sessionAnchorInputVersion;
     private SessionRow? _pendingSessionAnchor;
@@ -93,6 +103,17 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         MessageList.ItemsSource = _messages;
         MessageList.ItemContainerTransitions = [];
+        MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
+        {
+            _jumpingLatest = false; ++_latestScrollGeneration;
+            if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) return;
+            _following = false;
+            for (var node = e.OriginalSource as DependencyObject; node is not null && node != MessageList; node = VisualTreeHelper.GetParent(node))
+                if (node is ScrollViewer inner && inner.VerticalOffset > 160) return;
+            RequestEarlier();
+        }), true);
+        MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
+        { if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.ItemContainerTransitions = _noSessionTransitions;
         _timer = DispatcherQueue.CreateTimer(); _timer.Interval = TimeSpan.FromSeconds(3);
@@ -171,7 +192,7 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetAcceleratorKey(SettingsButton, "Ctrl+,"); AutomationProperties.SetAcceleratorKey(RefreshButton, "F5");
         AutomationProperties.SetAcceleratorKey(SendButton, "Ctrl+Enter");
         DetailsMenu.Text = _text["Details"]; ExportMenu.Text = _text["Export"]; OpenFolderMenu.Text = _text["OpenFolder"];
-        Label(LatestButton, "JumpToLatest");
+        Label(LatestButton, "JumpToLatest"); AutomationProperties.SetName(EarlierRing, _text["LoadingEarlier"]);
         Composer.PlaceholderText = _text["MessagePlaceholder"]; AutomationProperties.SetName(Composer, _text["MessageInput"]);
         TranscriptSearch.PlaceholderText = _text["SearchTranscript"]; AutomationProperties.SetName(TranscriptSearch, _text["SearchTranscript"]);
         NoSessionsTitle.Text = _text["NoSessions"]; NoSessionsHint.Text = _text["NoSessionsHint"];
@@ -249,7 +270,7 @@ public sealed partial class MainWindow : Window
                     {
                         if (item.IsLive) _sessionConnectionFailures.Remove(item.Id);
                         if (merged.TryGetValue(item.Id, out var disk)) merged[item.Id] = item with
-                        { FilePath = disk.FilePath, Title = string.IsNullOrEmpty(item.Title) ? disk.Title : item.Title, ParentId = item.ParentId ?? disk.ParentId, Model = disk.Model,
+                        { FilePath = disk.FilePath, Title = string.IsNullOrEmpty(item.Title) ? disk.Title : item.Title, ParentId = item.ParentId ?? disk.ParentId, Model = item.Model.Length > 0 ? item.Model : disk.Model,
                             State = item.State == SessionState.Unknown && !_attached.Contains(item.Id) ? disk.State : item.State, FileVersion = disk.FileVersion };
                         else merged[item.Id] = item;
                     }
@@ -396,15 +417,26 @@ public sealed partial class MainWindow : Window
             if (sourceClient is not null)
             {
                 reading = _serverRead = new(sourceClient, session.Id, generation, initialNotifications?.ToList() ?? new List<RpcMessage>());
-                serverSnapshot = await sourceClient.ReadTranscriptStateAsync(session.Id, cts.Token);
-                snapshot = new(session, serverSnapshot.Entries);
-                if (!ReferenceEquals(sourceClient, _client) || !sourceClient.IsConnected) return;
+                serverSnapshot = await sourceClient.ReadTranscriptPageAsync(session.Id, ct: cts.Token);
+                var sameSource = _historySessionId == session.Id && ReferenceEquals(_historyClient, sourceClient);
+                snapshot = new(session, sameSource && _snapshot is not null ? ServerTranscript.Merge(_snapshot.Entries, serverSnapshot.Entries, false) : serverSnapshot.Entries);
+                if (!ReferenceEquals(sourceClient, _client) || !sourceClient.IsConnected || generation != _transcriptReadGeneration || _selected?.Id != session.Id) return;
+                if (!sameSource) { ResetHistory(session.Id, sourceClient); _historyCursor = serverSnapshot.NextCursor; _hasEarlier = _historyCursor is not null; }
             }
             else if (File.Exists(session.FilePath))
             {
                 var initialLength = new FileInfo(session.FilePath).Length;
-                snapshot = await Task.Run(() => _readLocalTranscript(session, cts.Token), cts.Token);
+                LocalTranscriptPage? localPage = null;
+                if (!_reviewMode || _pagedReview)
+                {
+                    var start = _historySessionId == session.Id && _historyClient is null ? _historyStart : null;
+                    localPage = await Task.Run(() => new LocalTranscriptPager().ReadAsync(session, start, ct: cts.Token), cts.Token);
+                    snapshot = localPage.Snapshot;
+                }
+                else snapshot = await Task.Run(() => _readLocalTranscript(session, cts.Token), cts.Token);
                 if (_selected?.Id != session.Id || cts.IsCancellationRequested || generation != _transcriptReadGeneration || _client is { IsConnected: true } && _attached.Contains(session.Id)) return;
+                if (_historySessionId != session.Id || _historyClient is not null) ResetHistory(session.Id, null);
+                if (localPage is not null) { _historyStart = localPage.StartOffset; _hasEarlier = localPage.HasEarlier; }
                 _selectedLength = initialLength;
                 if (session.IsLive && _client is { IsConnected: true }) snapshot = snapshot with { Session = session };
             }
@@ -435,15 +467,13 @@ public sealed partial class MainWindow : Window
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var viewingId = _selected?.Id;
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
-            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following);
-        // Virtualized ListView keeps the entire transcript accessible without an artificial history cutoff.
+            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier);
         if (reset) _messages.Clear();
-        // Replace only changed rows. Rebuilding the tail discards virtualized scroll anchors.
-        var common = Math.Min(_messages.Count, rows.Count);
-        for (int i = 0; i < common; i++) if (!_messages[i].Matches(rows[i]))
-        { if (MessageList.ContainerFromIndex(i) is DependencyObject container) TranscriptCard.PreserveScroll(container, _messages[i]); _messages[i].Update(rows[i]); }
-        while (_messages.Count > rows.Count) _messages.RemoveAt(_messages.Count - 1);
-        for (int i = common; i < rows.Count; i++) _messages.Add(rows[i]);
+        var anchor = !_following && !reset ? ScrollAnchor.Capture(MessageList) : null;
+        for (int i = 0; i < _messages.Count; i++)
+            if (MessageList.ContainerFromIndex(i) is DependencyObject container) TranscriptCard.PreserveScroll(container, _messages[i]);
+        EntryRows.Synchronize(_messages, rows);
+        anchor?.Restore();
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -451,6 +481,41 @@ public sealed partial class MainWindow : Window
             TrackTranscriptScroll();
             if (_messageScroll is not null) SetLatestVisible(_readingActivityHistory || !_following && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset >= 24);
         });
+    }
+    private void ResetHistory(string id, CodexClient? client)
+    {
+        _historySessionId = id; _historyClient = client; _historyStart = null; _historyCursor = null; _hasEarlier = false;
+        _activityGroupIdentities.Clear();
+    }
+    private void RequestEarlier()
+    {
+        if (!_hasEarlier || _loadingEarlier || _serverRead is not null || _snapshot is null || _messageScroll is { VerticalOffset: > 200 }) return;
+        _following = false; _jumpingLatest = false; ++_latestScrollGeneration; _ = LoadEarlierAsync();
+    }
+    private async Task LoadEarlierAsync()
+    {
+        if (_selected is not { } session || _loadingEarlier || !_hasEarlier) return;
+        _loadingEarlier = true; EarlierRing.IsActive = true; EarlierRing.Visibility = Visibility.Visible;
+        var generation = _transcriptReadGeneration; var client = _historyClient;
+        try
+        {
+            if (client is not null)
+            {
+                var page = await client.ReadTranscriptPageAsync(session.Id, _historyCursor, _lifetime.Token);
+                if (generation != _transcriptReadGeneration || _selected?.Id != session.Id || !ReferenceEquals(client, _historyClient) || !client.IsConnected) return;
+                _snapshot = _snapshot! with { Entries = ServerTranscript.Merge(_snapshot!.Entries, page.Entries, true) };
+                _historyCursor = page.NextCursor; _hasEarlier = page.NextCursor is not null;
+            }
+            else
+            {
+                var page = await Task.Run(() => new LocalTranscriptPager().ReadAsync(session, _historyStart, older: true, ct: _lifetime.Token));
+                if (generation != _transcriptReadGeneration || _selected?.Id != session.Id || _historyClient is not null) return;
+                _historyStart = page.StartOffset; _hasEarlier = page.HasEarlier; _snapshot = page.Snapshot;
+            }
+            RenderMessages();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException or OperationCanceledException) { }
+        finally { _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
     }
     private void UpdateTitle()
     {
@@ -473,10 +538,12 @@ public sealed partial class MainWindow : Window
         var showConnect = _selected is not null && !archived && !showResume;
         var failure = _selected is not null ? _sessionConnectionFailures.GetValueOrDefault(_selected.Id) : null;
         var checking = showConnect && failure is null && !_sessionServerCheckedAt.ContainsKey(_selected!.Id) && !_findingSessionServer;
-        var needsTurn = attached && _selected?.State is SessionState.Active or SessionState.Waiting && string.IsNullOrEmpty(_selected.ActiveTurnId);
-        SessionSetupHelp.Visibility = !attached && !archived && failure is null && !checking ? Visibility.Visible : Visibility.Collapsed;
-        SessionSetupActions.Visibility = !attached && !archived ? Visibility.Visible : Visibility.Collapsed;
-        Composer.Visibility = ComposerActions.Visibility = attached ? Visibility.Visible : Visibility.Collapsed;
+        var needsTurn = attached && (_selected?.IsLive != true || _selected.State is SessionState.Active or SessionState.Waiting && string.IsNullOrEmpty(_selected.ActiveTurnId));
+        if (needsTurn) { showResume = false; showConnect = true; }
+        if (needsTurn) checking = false;
+        SessionSetupHelp.Visibility = (!attached || needsTurn) && !archived && failure is null && !checking ? Visibility.Visible : Visibility.Collapsed;
+        SessionSetupActions.Visibility = (!attached || needsTurn) && !archived ? Visibility.Visible : Visibility.Collapsed;
+        Composer.Visibility = ComposerActions.Visibility = attached && !needsTurn ? Visibility.Visible : Visibility.Collapsed;
         ArchiveExplanation.Visibility = archived ? Visibility.Visible : Visibility.Collapsed;
         ResumeButton.Visibility = RestoreExplanation.Visibility = showResume && failure is null ? Visibility.Visible : Visibility.Collapsed;
         SessionConnectButton.Visibility = ConnectExplanation.Visibility = showConnect && failure is null && !checking ? Visibility.Visible : Visibility.Collapsed;
@@ -485,19 +552,20 @@ public sealed partial class MainWindow : Window
         SessionServerCheckingText.Text = _text["FindingSessionServer"];
         SessionConnectionUnavailable.Visibility = !archived && failure is not null ? Visibility.Visible : Visibility.Collapsed;
         SessionConnectionReason.Text = failure is not null ? _text[failure] : "";
-        SessionConnectLabel.Text = _text[_findingSessionServer ? "FindingSessionServer" : _connecting ? "SessionConnecting" : "ConnectSession"];
+        SessionConnectLabel.Text = _text[_findingSessionServer ? "FindingSessionServer" : _connecting ? "SessionConnecting" : needsTurn ? "ReconnectSession" : "ConnectSession"];
+        ConnectExplanation.Text = _text[needsTurn ? "ReconnectSessionExplanation" : "ConnectSessionExplanation"];
         ResumeLabel.Text = _text[_sending && !attached ? "Loading" : "Resume"];
         RetrySessionConnectionMenu.Text = _text["CheckAgain"];
         RetrySessionConnectionMenu.Visibility = failure is not null || needsTurn ? Visibility.Visible : Visibility.Collapsed;
         RetrySessionConnectionMenu.IsEnabled = !_findingSessionServer && !_connecting && !_sending && _checkingSessionServerId != _selected?.Id;
         SessionConnectButton.IsEnabled = !_findingSessionServer && !_connecting && !_sending && _selected is { IsArchived: false } && (!attached || needsTurn);
-        AutomationProperties.SetName(SessionConnectButton, _text["ConnectSessionHint"]);
-        AutomationProperties.SetHelpText(SessionConnectButton, _text["ConnectSessionExplanation"]);
+        AutomationProperties.SetName(SessionConnectButton, _text[needsTurn ? "ReconnectSession" : "ConnectSessionHint"]);
+        AutomationProperties.SetHelpText(SessionConnectButton, _text[needsTurn ? "ReconnectSessionExplanation" : "ConnectSessionExplanation"]);
         AutomationProperties.SetHelpText(ResumeButton, _text["RestoreSessionExplanation"]);
-        ToolTipService.SetToolTip(SessionConnectButton, attached && !needsTurn ? _connectionEndpoint ?? _text["SessionConnected"] : _text["ConnectSessionHint"]);
+        ToolTipService.SetToolTip(SessionConnectButton, needsTurn ? _text["ReconnectSessionExplanation"] : attached ? _connectionEndpoint ?? _text["SessionConnected"] : _text["ConnectSessionHint"]);
         var active = _selected?.State is SessionState.Active or SessionState.Waiting;
         var canSteer = active && !string.IsNullOrEmpty(_selected?.ActiveTurnId);
-        Composer.IsEnabled = attached && _selected?.IsLive == true && (!active || canSteer) && !_sending;
+        Composer.IsEnabled = attached && _selected?.IsLive == true && (!active || canSteer) && !_sending && !_pendingInputs.Values.Any(p => p.Request.ThreadId == _selected?.Id);
         SendButton.IsEnabled = Composer.IsEnabled && !string.IsNullOrWhiteSpace(Composer.Text);
         SendButton.Content = _text[canSteer ? "Steer" : "Send"];
         StopButton.Visibility = attached && canSteer ? Visibility.Visible : Visibility.Collapsed;
@@ -615,7 +683,7 @@ public sealed partial class MainWindow : Window
         });
     }
     private void InvalidateTranscriptRead()
-    { ++_transcriptReadGeneration; _selectionCts?.Cancel(); _serverRead = null; if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
+    { ++_transcriptReadGeneration; _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;
@@ -687,7 +755,7 @@ public sealed partial class MainWindow : Window
         _sessionConnectionFailures.Remove(original.Id);
         _sessionServerCheckedAt[original.Id] = DateTimeOffset.UtcNow;
         _attached.Add(original.Id);
-        var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = original.Model, FileVersion = original.FileVersion };
+        var joined = runtime with { FilePath = original.FilePath, Title = original.Title, ParentId = original.ParentId, Model = runtime.Model.Length > 0 ? runtime.Model : original.Model, FileVersion = original.FileVersion };
         _sessions = _sessions.Select(s => s.Id == original.Id ? joined : s).ToArray();
         if (_selected?.Id == original.Id) { _selected = joined; _snapshot = new(joined, Array.Empty<TranscriptEntry>()); }
         ApplyFilter();
@@ -773,18 +841,27 @@ public sealed partial class MainWindow : Window
         if (message.Id is not null) { _ = HandleRequestAsync(client, message); return; }
         message = RecordedEvents.Normalize(message);
         var p = message.Parameters;
+        if (message.Method == "serverRequest/resolved" && _pendingInputs.TryGetValue((client, p.Field("requestId").GetRawText()), out var resolved)) resolved.Cancellation.Cancel();
+        if (message.Method is "turn/completed" or "thread/closed" or "thread/reverted")
+            foreach (var pending in _pendingInputs.Values.Where(x => x.Request.ThreadId == p.Str("threadId"))) pending.Cancellation.Cancel();
         if (ProtocolEventCatalog.Notifications.TryGetValue(message.Method, out var definition) && definition.Route == ProtocolEventRoute.Server)
         {
             if (TranscriptEvents.Parse(message.Method, p, DateTimeOffset.Now) is { } systemEvent) _serverEvents[systemEvent.Id] = systemEvent;
             return;
         }
+        if (message.Method == "thread/reverted" && p.Str("threadId") == _selected?.Id)
+        { ResetHistory(_selected.Id, null); _ = LoadTranscriptAsync(_selected, true); return; }
         UpdateSessionActivity(message);
         var threadId = p.Str("threadId");
         if (_selected is null || !_attached.Contains(_selected.Id) || threadId != _selected.Id && !(threadId.Length == 0 && TranscriptEvents.IsGlobal(message.Method))) return;
         if (_serverRead is { } reading && ReferenceEquals(reading.Client, client) && (reading.SessionId == threadId || threadId.Length == 0))
         { reading.Messages.Add(message); return; }
+        client.Models.Observe(message.Method, p);
         var previous = _snapshot?.Entries ?? Array.Empty<TranscriptEntry>();
-        var entries = TranscriptUpdates.Apply(previous, message.Method, p, DateTimeOffset.Now);
+        var modelTurn = p.Str("turnId", p.Field("turn").Str("id", _selected.ActiveTurnId ?? ""));
+        var entries = TranscriptUpdates.Apply(previous, message.Method, p, DateTimeOffset.Now, client.Models.ForTurn(_selected.Id, modelTurn.Length > 0 ? modelTurn : null), modelTurn);
+        var modelItemId = p.Str("itemId", p.Str("item_id", p.Field("item").Str("id")));
+        if (modelItemId.Length > 0) client.Models.Remember(_selected.Id, modelItemId, entries.FirstOrDefault(e => e.Id == modelItemId)?.Model);
         if (!ReferenceEquals(previous, entries)) { _snapshot = _snapshot is null ? new(_selected, entries) : _snapshot with { Session = _selected, Entries = entries }; RenderMessages(); }
         switch (message.Method)
         {
@@ -828,7 +905,24 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (message.Method is "item/commandExecution/requestApproval" or "item/fileChange/requestApproval")
+            if (message.Method is "item/tool/requestUserInput" or "tool/requestUserInput")
+            {
+                var key = (client, message.Id!.Value.GetRawText()); if (_pendingInputs.ContainsKey(key)) return;
+                var request = UserInputRequest.Parse(message.Parameters);
+                using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                var pending = new PendingInput(client, request, cancellation); _pendingInputs.Add(key, pending); UpdateChrome();
+                try
+                {
+                    var panel = new UserInputPanel(request, _text, _sessions.FirstOrDefault(s => s.Id == request.ThreadId)?.Title ?? request.ThreadId);
+                    var dialog = new ContentDialog { Title = _text["UserInputTitle"], Content = new ScrollViewer { Content = panel, MaxHeight = Math.Min(440, Math.Max(160, Root.ActualHeight - 240)) }, PrimaryButtonText = _text["SubmitAnswers"], CloseButtonText = _text["Cancel"], IsPrimaryButtonEnabled = false, DefaultButton = ContentDialogButton.None };
+                    panel.AnswerChanged += () => dialog.IsPrimaryButtonEnabled = panel.Complete;
+                    var result = await ShowDialogAsync(dialog, cancellation.Token);
+                    if (!ReferenceEquals(client, _client) || !client.IsConnected) return;
+                    await client.Rpc.RespondAsync(message.Id.Value, result == ContentDialogResult.Primary ? request.Respond(panel.Answers) : UserInputRequest.Cancelled(), cancellation.Token);
+                }
+                finally { if (_pendingInputs.GetValueOrDefault(key) == pending) _pendingInputs.Remove(key); UpdateChrome(); }
+            }
+            else if (message.Method is "item/commandExecution/requestApproval" or "item/fileChange/requestApproval")
             {
                 var p = message.Parameters;
                 var content = new StackPanel { Spacing = 12 };
@@ -859,9 +953,11 @@ public sealed partial class MainWindow : Window
     }
     private void OnTranscriptViewChanged(object? sender, ScrollViewerViewChangedEventArgs args)
     {
-        if (args.IsIntermediate || _messageScroll is null) return;
+        if (args.IsIntermediate || _messageScroll is null || _jumpingLatest) return;
         _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
         SetLatestVisible(!_following);
+        if (_messageScroll.VerticalOffset < _previousTranscriptOffset && _messageScroll.VerticalOffset < 200) RequestEarlier();
+        _previousTranscriptOffset = _messageScroll.VerticalOffset;
     }
     private void SetLatestVisible(bool visible)
     {
@@ -887,12 +983,21 @@ public sealed partial class MainWindow : Window
         { var child = VisualTreeHelper.GetChild(root, i); if (child is T match) return match; if (FindVisual<T>(child) is { } nested) return nested; }
         return null;
     }
-    private void ScrollLatest()
+    private async void ScrollLatest()
     {
-        if (_messages.Count == 0) return;
-        MessageList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Leading);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        { if (_following && _messages.Count > 0 && MessageList.ContainerFromIndex(_messages.Count - 1) is DependencyObject container) TranscriptCard.ScrollGroupToEnd(container, _messages[^1]); });
+        if (_messages.Count == 0 || !_following || _closing) return;
+        var generation = ++_latestScrollGeneration; _jumpingLatest = true;
+        // Virtualized item heights become exact only after realization. Settle the end over a few frames,
+        // while an explicit upward gesture cancels this follow immediately.
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            if (_closing || generation != _latestScrollGeneration || !_following || _messages.Count == 0) return;
+            MessageList.ScrollIntoView(_messages[^1], ScrollIntoViewAlignment.Leading); MessageList.UpdateLayout(); TrackTranscriptScroll();
+            _messageScroll?.ChangeView(null, _messageScroll.ScrollableHeight, null, true);
+            if (MessageList.ContainerFromIndex(_messages.Count - 1) is DependencyObject container) TranscriptCard.ScrollGroupToEnd(container, _messages[^1]);
+            await Task.Delay(16);
+        }
+        if (generation == _latestScrollGeneration) { _jumpingLatest = false; _following = true; SetLatestVisible(false); }
     }
     private void OnLatest(object sender, RoutedEventArgs e) { _readingActivityHistory = false; _following = true; ScrollLatest(); SetLatestVisible(false); }
     private void OnTranscriptSearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RenderMessages(true); }
@@ -907,16 +1012,19 @@ public sealed partial class MainWindow : Window
     private void OnFind(object sender, RoutedEventArgs e) => ToggleFind(true);
     private void OnCloseFind(object sender, RoutedEventArgs e) => ToggleFind(false);
     private void OnTogglePane(object sender, RoutedEventArgs e) => Shell.IsPaneOpen = !Shell.IsPaneOpen;
-    private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
+    private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog, CancellationToken cancellation = default)
     {
-        await _dialogs.WaitAsync(_lifetime.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellation);
+        await _dialogs.WaitAsync(linked.Token);
         var returnFocus = FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
         try
         {
             dialog.XamlRoot = Root.XamlRoot; dialog.RequestedTheme = Root.RequestedTheme;
             dialog.FlowDirection = Root.FlowDirection; dialog.Language = Root.Language;
             dialog.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(dialog);
-            return await dialog.ShowAsync();
+            linked.Token.ThrowIfCancellationRequested();
+            using var registration = linked.Token.Register(() => DispatcherQueue.TryEnqueue(() => dialog.Hide()));
+            var result = await dialog.ShowAsync(); linked.Token.ThrowIfCancellationRequested(); return result;
         }
         finally { _dialogs.Release(); if (!_closing) AccessibilitySupport.RestoreFocus(returnFocus, SettingsButton); }
     }

@@ -43,7 +43,7 @@ public sealed class ReadingControlsUiTests
         Assert.IsTrue(button.Bottom < window.ReviewBounds()["footer"].Top);
         Assert.AreEqual(new LocalizationService(language)["JumpToLatest"], window.ReviewLatestName);
         TestContext.AddResultFile(await window.CaptureReviewAsync($"latest-floating-{theme}-{language}"));
-        window.ReviewJumpLatest(); await MainWindow.SettleAsync(); Assert.IsFalse(window.ReviewLatestVisible);
+        window.ReviewJumpLatest(); await MainWindow.SettleAsync(); Assert.IsFalse(window.ReviewLatestVisible, window.ReviewScrollDebug);
         Assert.AreEqual(before.Height, window.ReviewBounds()["messages"].Height, 0.1);
         await window.TranscriptAnchorReviewAsync(false); window.ReviewToggleLatest(false); window.ReviewToggleLatest(true);
         await MainWindow.SettleAsync(); Assert.IsTrue(window.ReviewLatestVisible); Assert.AreEqual(1d, window.ReviewLatestOpacity, 0.01);

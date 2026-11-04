@@ -258,5 +258,17 @@
   "EventSession": "セッションの更新",
   "EventRealtime": "リアルタイムセッション",
   "EventConfiguration": "構成の更新",
-  "EventConnection": "接続の更新"
+  "EventConnection": "接続の更新",
+  "ActivityGroup": "アクティビティ",
+  "ActivityGroupHelp": "このアクティビティグループを折りたたむ、または展開します。",
+  "Working": "作業中",
+  "IncompleteActivity": "未完了のアクティビティ",
+  "ReconnectSession": "再接続",
+  "ReconnectSessionExplanation": "ターン情報を取得できません。再接続すると、ライブ状態とトランスクリプトを再読み込みし、メッセージの送信や現在のターンへの指示ができます。",
+  "UserInputTitle": "回答が必要です",
+  "UserInputHint": "回答すると、Codex がこの会話を続けます。",
+  "SubmitAnswers": "回答を送信",
+  "OtherAnswer": "その他の回答",
+  "AnswerPlaceholder": "回答を入力",
+  "LoadingEarlier": "以前の内容を読み込み中…"
 }

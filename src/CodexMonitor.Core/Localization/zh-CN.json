@@ -258,5 +258,17 @@
   "EventSession": "会话更新",
   "EventRealtime": "实时会话",
   "EventConfiguration": "配置更新",
-  "EventConnection": "连接更新"
+  "EventConnection": "连接更新",
+  "ActivityGroup": "工具活动",
+  "ActivityGroupHelp": "收起或展开这组活动。",
+  "Working": "工作中",
+  "IncompleteActivity": "未完成的活动",
+  "ReconnectSession": "重新连接",
+  "ReconnectSessionExplanation": "服务器尚未提供当前轮次。重新连接会重新读取实时状态和对话记录，以便继续发送消息或指引当前轮次。",
+  "UserInputTitle": "需要你的回答",
+  "UserInputHint": "回答后，Codex 将继续此会话。",
+  "SubmitAnswers": "提交回答",
+  "OtherAnswer": "其他回答",
+  "AnswerPlaceholder": "输入回答",
+  "LoadingEarlier": "正在加载更早的内容"
 }

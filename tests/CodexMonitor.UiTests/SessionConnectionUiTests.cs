@@ -32,6 +32,7 @@ public sealed class SessionConnectionUiTests
                 "thread/loaded/list" => new { data = owns ? new[] { "review-session" } : [] },
                 "thread/read" or "thread/resume" => new { thread = new { id = "review-session", status = new { type = "active" } } },
                 "thread/turns/list" => new { data = turnKnown ? new[] { new { id = "turn", status = "inProgress", items = Array.Empty<object>() } } : [] },
+                "thread/items/list" => new { data = Array.Empty<object>() },
                 _ => throw new InvalidOperationException("Unexpected action: " + method)
             };
             _incoming.Writer.TryWrite(JsonSerializer.Serialize(new { id = request.Field("id"), result })); return Task.CompletedTask;
@@ -134,7 +135,7 @@ public sealed class SessionConnectionUiTests
         window.ConfigureSessionConnectionReview(new Locator(true), (_, _) => Task.FromResult(new CodexClient(new JsonRpcClient(runtime))));
         await window.ConnectSessionReviewAsync();
         Assert.IsTrue(window.ReviewSessionAttached); Assert.AreEqual(turnKnown, window.ReviewCanCompose);
-        Assert.IsFalse(window.ReviewSetupVisible); Assert.IsFalse(window.ReviewConnectionButtonVisible); Assert.IsTrue(window.ReviewComposerVisible);
+        Assert.AreEqual(!turnKnown, window.ReviewSetupVisible); Assert.AreEqual(!turnKnown, window.ReviewConnectionButtonVisible); Assert.AreEqual(turnKnown, window.ReviewComposerVisible);
         Assert.IsFalse(runtime.Methods.Contains("turn/start")); Assert.IsFalse(runtime.Methods.Contains("turn/steer"));
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-owner-760-dark-" + turnKnown));
     }

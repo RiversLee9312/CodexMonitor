@@ -258,5 +258,17 @@
   "EventSession": "Session update",
   "EventRealtime": "Realtime session",
   "EventConfiguration": "Configuration update",
-  "EventConnection": "Connection update"
+  "EventConnection": "Connection update",
+  "ActivityGroup": "Activity",
+  "ActivityGroupHelp": "Collapse or expand this activity group.",
+  "Working": "Working",
+  "IncompleteActivity": "Unfinished activity",
+  "ReconnectSession": "Reconnect",
+  "ReconnectSessionExplanation": "Turn information is unavailable. Reconnect to reload live state and the transcript so you can send messages or steer the current turn.",
+  "UserInputTitle": "Your input is needed",
+  "UserInputHint": "Codex will continue this conversation after you respond.",
+  "SubmitAnswers": "Submit answers",
+  "OtherAnswer": "Other answer",
+  "AnswerPlaceholder": "Enter your answer",
+  "LoadingEarlier": "Loading earlier content"
 }

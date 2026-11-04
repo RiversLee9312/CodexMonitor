@@ -258,5 +258,17 @@
   "EventSession": "세션 업데이트",
   "EventRealtime": "실시간 세션",
   "EventConfiguration": "구성 업데이트",
-  "EventConnection": "연결 업데이트"
+  "EventConnection": "연결 업데이트",
+  "ActivityGroup": "활동",
+  "ActivityGroupHelp": "이 활동 그룹을 접거나 펼칩니다.",
+  "Working": "작업 중",
+  "IncompleteActivity": "완료되지 않은 활동",
+  "ReconnectSession": "다시 연결",
+  "ReconnectSessionExplanation": "턴 정보를 사용할 수 없습니다. 다시 연결하면 실시간 상태와 대화 기록을 다시 불러와 메시지를 보내거나 현재 턴을 안내할 수 있습니다.",
+  "UserInputTitle": "답변이 필요합니다",
+  "UserInputHint": "답변하면 Codex가 이 대화를 계속합니다.",
+  "SubmitAnswers": "답변 제출",
+  "OtherAnswer": "기타 답변",
+  "AnswerPlaceholder": "답변 입력",
+  "LoadingEarlier": "이전 내용 불러오는 중…"
 }

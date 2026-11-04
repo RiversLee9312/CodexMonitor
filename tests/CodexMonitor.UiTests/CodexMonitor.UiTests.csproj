@@ -22,6 +22,10 @@
     <!-- Compile the production view and styles, rather than a replica used only by tests. -->
     <Compile Include="..\..\src\CodexMonitor.App\MainWindow.xaml.cs" Link="MainWindow.xaml.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\Presentation.cs" Link="Presentation.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\ActivityGroupView.cs" Link="ActivityGroupView.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\EntryRows.cs" Link="EntryRows.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\ScrollAnchor.cs" Link="ScrollAnchor.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\UserInputPanel.cs" Link="UserInputPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ActivityDetails.cs" Link="ActivityDetails.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ActivityIcon.cs" Link="ActivityIcon.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\AccessibilitySupport.cs" Link="AccessibilitySupport.cs"/>

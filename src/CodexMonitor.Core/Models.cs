@@ -26,7 +26,8 @@ public sealed record SessionInfo
 }
 
 public sealed record TranscriptEntry(string Id, EntryKind Kind, string Text, DateTimeOffset Timestamp,
-    string? Label = null, string? RawJson = null, ToolActivity? Tool = null, ReasoningContent? Reasoning = null);
+    string? Label = null, string? RawJson = null, ToolActivity? Tool = null, ReasoningContent? Reasoning = null,
+    string? TurnId = null, string? Model = null);
 
 public sealed record TranscriptSnapshot(SessionInfo Session, IReadOnlyList<TranscriptEntry> Entries,
     int InvalidRecords = 0, int UnknownRecords = 0, long Tokens = 0);

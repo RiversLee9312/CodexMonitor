@@ -12,7 +12,9 @@ public static class TranscriptExport
         foreach (var entry in transcript.Entries)
         {
             var role = text[entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
-            b.Append("## ").Append(role).Append(" · ").AppendLine(text.DateTime(entry.Timestamp)).AppendLine();
+            b.Append("## ").Append(role);
+            if (entry.Kind == EntryKind.Assistant && entry.Model is { Length: > 0 } model) b.Append(" · ").Append(model.Replace('\n', ' '));
+            b.Append(" · ").AppendLine(text.DateTime(entry.Timestamp)).AppendLine();
             if (entry.Kind is EntryKind.Tool or EntryKind.Event)
             {
                 var fence = new string('`', Math.Max(3, LongestBackticks(entry.Text) + 1));

@@ -258,5 +258,17 @@
   "EventSession": "Sessionsuppdatering",
   "EventRealtime": "Realtidssession",
   "EventConfiguration": "Konfigurationsuppdatering",
-  "EventConnection": "Anslutningsuppdatering"
+  "EventConnection": "Anslutningsuppdatering",
+  "ActivityGroup": "Aktivitet",
+  "ActivityGroupHelp": "Fäll ihop eller expandera den här aktivitetsgruppen.",
+  "Working": "Arbetar",
+  "IncompleteActivity": "Ofullständig aktivitet",
+  "ReconnectSession": "Anslut igen",
+  "ReconnectSessionExplanation": "Information om omgången saknas. Anslut igen för att läsa in realtidsstatus och transkript på nytt så att du kan skicka meddelanden eller styra den aktuella omgången.",
+  "UserInputTitle": "Ditt svar behövs",
+  "UserInputHint": "Codex fortsätter den här konversationen när du har svarat.",
+  "SubmitAnswers": "Skicka svar",
+  "OtherAnswer": "Annat svar",
+  "AnswerPlaceholder": "Skriv ditt svar",
+  "LoadingEarlier": "Läser in tidigare innehåll…"
 }

@@ -18,12 +18,14 @@ public sealed class AccessibilityTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
-    [DataRow("Light", "zh-CN", false, false)]
-    [DataRow("Dark", "de-DE", false, false)]
-    [DataRow("Dark", "ar-SA", false, false)]
-    [DataRow("Dark", "zh-CN", true, false)]
-    [DataRow("Light", "zh-CN", false, true)]
-    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses, bool serverStatus)
+    [DataRow("Light", "zh-CN", false, false, false)]
+    [DataRow("Dark", "de-DE", false, false, false)]
+    [DataRow("Dark", "ar-SA", false, false, false)]
+    [DataRow("Dark", "zh-CN", true, false, false)]
+    [DataRow("Light", "zh-CN", false, true, false)]
+    [DataRow("Light", "zh-CN", false, false, true)]
+    [DataRow("Dark", "ar-SA", false, false, true)]
+    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses, bool serverStatus, bool question)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, theme, language); await window.ShowActivityReviewAsync(true);
         ContentDialog? licenseDialog = null;
@@ -43,6 +45,13 @@ public sealed class AccessibilityTests
             foreach (var popup in Microsoft.UI.Xaml.Media.VisualTreeHelper.GetOpenPopupsForXamlRoot(window.ReviewRoot.XamlRoot)) Expand(popup.Child);
             await MainWindow.SettleAsync();
         }
+        if (question)
+        {
+            using var q = JsonDocument.Parse("""{"threadId":"review-session","questions":[{"id":"mode","header":"Mode","question":"Choose how to continue","isOther":true,"options":[{"label":"Review first","description":"Keep changes ready for review."}]},{"id":"value","header":"Private value","question":"Enter a private value","isSecret":true}]}""");
+            var panel = new UserInputPanel(UserInputRequest.Parse(q.RootElement), new(language), "Example conversation");
+            licenseDialog = new ContentDialog { Title = new LocalizationService(language)["UserInputTitle"], Content = new ScrollViewer { Content = panel, MaxHeight = 400 }, PrimaryButtonText = new LocalizationService(language)["SubmitAnswers"], CloseButtonText = new LocalizationService(language)["Cancel"], IsPrimaryButtonEnabled = false, XamlRoot = window.ReviewRoot.XamlRoot, RequestedTheme = window.ReviewTheme, FlowDirection = window.ReviewRoot.FlowDirection, Language = language };
+            licenseClosing = licenseDialog.ShowAsync(); await MainWindow.SettleAsync();
+        }
         try
         {
             var directory = Path.GetFullPath(Path.Combine(MainWindow.ScreenshotDirectory, "..", "accessibility")); Directory.CreateDirectory(directory);
@@ -50,7 +59,7 @@ public sealed class AccessibilityTests
             var repo = new DirectoryInfo(AppContext.BaseDirectory);
             while (repo is not null && !File.Exists(Path.Combine(repo.FullName, "CodexMonitor.sln"))) repo = repo.Parent;
             Assert.IsNotNull(repo);
-            var scanId = $"view-{theme}-{language}" + (licenses ? "-licenses" : serverStatus ? "-server-status" : "");
+            var scanId = $"view-{theme}-{language}" + (question ? "-question" : licenses ? "-licenses" : serverStatus ? "-server-status" : "");
             TestContext.AddResultFile(await window.CaptureReviewAsync(scanId, statusDialog ?? licenseDialog));
             var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var arg in new[] { "run", "--project", Path.Combine(repo.FullName, "tests", "CodexMonitor.Accessibility"), "--", Environment.ProcessId.ToString(), handle.ToInt64().ToString(), directory, scanId }) start.ArgumentList.Add(arg);

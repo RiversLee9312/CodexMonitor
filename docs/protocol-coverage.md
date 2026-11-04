@@ -46,3 +46,13 @@
 单次调用复用命令、补丁、等待、MCP 等原有语义；批次在一个折叠活动内逐项显示参数，原生镜像逐条补充结果与状态。实际执行的相同调用仍逐条保留。原始输入和聚合输出保留用于导出。运行时参数、未知条件/函数、无法确定的变更、超出深度/步骤/大小限制或未完成的代码保留折叠源码，不推测执行结果；这不是通用 JavaScript 解释器，也不保证还原任意程序。当前 CLI 的18种 ResponseItem 清单与网页 Responses API 的实验性 program/program_output 契约分别管理。
 0.1.9：安装版真实记录补充 clock.sleep / clock__sleep 扩展别名与 duration_ms，按同一 sleep 投影、状态和 wire ID 合并，避免多出通用事件行。
 0.1.10：连续状态通知沿用尚未完成的侧栏锚点。批量导入后紧接状态更新的真实交错先复现失败，修复后16项侧栏回归通过；恢复期间继续核对布局位置，后续用户输入取消过期恢复。
+
+## 0.1.11：模型、生成阶段、提问和分页
+
+按本机 0.164.0 JSON Schema 核对：thread/items/list 支持跨整个会话按 item 游标分页，UI 每次仅请求 100 项；thread/turns/list 的 notLoaded 视图仅用于取得运行轮次。历史 Turn/agentMessage 不保证带模型，不能用 modelProvider 或当前设置回填旧回复。文件 turn_context、thread/settings/updated、model/rerouted 与已观察 item 模型组成展示记录。
+
+item/tool/requestUserInput（兼容旧 tool/requestUserInput）映射选择、可选自定义回答、自由与保密输入；响应采用 answers.{questionId}.answers。无自动默认提交；serverRequest/resolved、轮次完成、断联与来源切换撤销陈旧提问。
+
+Responses API 的 output_item.added、函数/自定义/MCP 参数、代码生成与图像生成进度统一为生成占位；直接消息和推理继续流式呈现。安装版 app-server 没有暴露这些 Responses 生成增量，原生 item/started 仍代表实际活动，不虚构前置生成阶段。补充 MCP、file_search、code_interpreter、program/program_output 的已知 Responses 结果布局。
+
+参考：[App-server](https://learn.chatgpt.com/docs/app-server)、[Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Function calling](https://developers.openai.com/api/docs/guides/function-calling)。

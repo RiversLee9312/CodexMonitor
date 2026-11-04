@@ -258,5 +258,17 @@
   "EventSession": "Opdatering af session",
   "EventRealtime": "Realtidssession",
   "EventConfiguration": "Konfigurationsopdatering",
-  "EventConnection": "Forbindelsesopdatering"
+  "EventConnection": "Forbindelsesopdatering",
+  "ActivityGroup": "Aktivitet",
+  "ActivityGroupHelp": "Fold denne aktivitetsgruppe sammen eller ud.",
+  "Working": "Arbejder",
+  "IncompleteActivity": "Uafsluttet aktivitet",
+  "ReconnectSession": "Opret forbindelse igen",
+  "ReconnectSessionExplanation": "Oplysninger om turen er ikke tilgængelige. Opret forbindelse igen for at indlæse live-status og transskriptionen på ny, så du kan sende meddelelser eller styre den aktuelle tur.",
+  "UserInputTitle": "Dit svar er nødvendigt",
+  "UserInputHint": "Codex fortsætter denne session, når du har svaret.",
+  "SubmitAnswers": "Send svar",
+  "OtherAnswer": "Andet svar",
+  "AnswerPlaceholder": "Skriv dit svar",
+  "LoadingEarlier": "Indlæser tidligere indhold…"
 }

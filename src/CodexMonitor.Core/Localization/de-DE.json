@@ -258,5 +258,17 @@
   "EventSession": "Sitzungsaktualisierung",
   "EventRealtime": "Echtzeitsitzung",
   "EventConfiguration": "Konfigurationsaktualisierung",
-  "EventConnection": "Verbindungsaktualisierung"
+  "EventConnection": "Verbindungsaktualisierung",
+  "ActivityGroup": "Aktivität",
+  "ActivityGroupHelp": "Diese Aktivitätsgruppe ein- oder ausklappen.",
+  "Working": "In Arbeit",
+  "IncompleteActivity": "Unvollständige Aktivität",
+  "ReconnectSession": "Erneut verbinden",
+  "ReconnectSessionExplanation": "Informationen zum Durchlauf sind nicht verfügbar. Stellen Sie die Verbindung wieder her, um Live-Status und Transkript neu zu laden und Nachrichten zu senden oder den aktuellen Durchlauf zu steuern.",
+  "UserInputTitle": "Ihre Antwort wird benötigt",
+  "UserInputHint": "Codex setzt diese Sitzung nach Ihrer Antwort fort.",
+  "SubmitAnswers": "Antworten absenden",
+  "OtherAnswer": "Andere Antwort",
+  "AnswerPlaceholder": "Antwort eingeben",
+  "LoadingEarlier": "Ältere Inhalte werden geladen…"
 }

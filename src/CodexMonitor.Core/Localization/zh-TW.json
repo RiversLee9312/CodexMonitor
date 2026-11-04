@@ -258,5 +258,17 @@
   "EventSession": "工作階段更新",
   "EventRealtime": "即時工作階段",
   "EventConfiguration": "組態更新",
-  "EventConnection": "連線更新"
+  "EventConnection": "連線更新",
+  "ActivityGroup": "工具活動",
+  "ActivityGroupHelp": "收合或展開這組活動。",
+  "Working": "工作中",
+  "IncompleteActivity": "未完成的活動",
+  "ReconnectSession": "重新連線",
+  "ReconnectSessionExplanation": "伺服器尚未提供目前回合。重新連線會重新載入即時狀態和對話記錄，讓你繼續傳送訊息或引導目前回合。",
+  "UserInputTitle": "需要你的回答",
+  "UserInputHint": "回答後，Codex 將繼續此工作階段。",
+  "SubmitAnswers": "送出回答",
+  "OtherAnswer": "其他回答",
+  "AnswerPlaceholder": "輸入回答",
+  "LoadingEarlier": "正在載入較早的內容"
 }

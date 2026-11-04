@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
         InvalidateTranscriptRead(); SetLatestVisible(false);
-        _serverEvents.Clear();
+        _serverEvents.Clear(); _historySessionId = null; _historyClient = null; _historyStart = null; _historyCursor = null; _hasEarlier = _loadingEarlier = _pagedReview = false; _activityGroupIdentities.Clear();
         _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
         foreach (var item in _reviewFontOverrides) item.Element.SetValue(item.Property, item.Value);
         _reviewFontOverrides.Clear();
@@ -108,6 +108,7 @@ public sealed partial class MainWindow
     internal bool ReviewComposerVisible => Composer.Visibility == Visibility.Visible;
     internal bool ReviewConnectionButtonVisible => ReviewSetupVisible && SessionConnectButton.Visibility == Visibility.Visible;
     internal bool ReviewConnectionHelpVisible => SessionSetupHelp.Visibility == Visibility.Visible && ConnectExplanation.Visibility == Visibility.Visible;
+    internal string ReviewConnectionExplanation => ConnectExplanation.Text;
     internal bool ReviewCanResume => ResumeButton.IsEnabled;
     internal bool ReviewResumeButtonVisible => ReviewSetupVisible && ResumeButton.Visibility == Visibility.Visible;
     internal bool ReviewServerChecking => ReviewSetupVisible && SessionServerChecking.Visibility == Visibility.Visible && SessionServerCheckingRing.IsActive;
@@ -140,6 +141,13 @@ public sealed partial class MainWindow
         _expandedActivities.Add(activity.Id); _expandedActivities.Add(activity.Id + ":edit:0"); RenderMessages(true); await SettleAsync();
     }
     internal IReadOnlyList<T> ReviewVisualElements<T>() where T : DependencyObject => Descendants(Root).OfType<T>().ToArray();
+    internal async Task ShowConversationPresentationReviewAsync(IReadOnlyList<TranscriptEntry> entries, bool live)
+    {
+        if (live) { await ConnectReviewServerAsync(); _selected = _selected! with { IsLive = true, State = SessionState.Active, ActiveTurnId = "turn" }; }
+        _snapshot = new(_selected!, entries); _expandedActivities.Clear(); _following = false; RenderMessages(true); UpdateChrome(); await SettleAsync();
+    }
+    internal async Task UpdateConversationPresentationReviewAsync(IReadOnlyList<TranscriptEntry> entries)
+    { _snapshot = new(_selected!, entries); RenderMessages(); await SettleAsync(); }
     internal async Task ShowProtocolEntryReviewAsync(TranscriptEntry entry, bool expand = true, bool live = false)
     {
         if (live) { await ConnectReviewServerAsync(); _selected = _selected! with { IsLive = true, State = SessionState.Active }; }
@@ -235,6 +243,27 @@ public sealed partial class MainWindow
     internal void ReviewTranscriptFile(string path) { _selected = _selected! with { FilePath = path }; }
     internal void ReviewLocalReader(Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> reader) => _readLocalTranscript = reader;
     internal Task ReviewReloadTranscript() => LoadTranscriptAsync(_selected!, false);
+    internal void ReviewUsePaging() { _pagedReview = true; _following = true; }
+    internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
+    internal bool ReviewHasEarlier => _hasEarlier;
+    internal bool ReviewLoadingEarlier => _loadingEarlier;
+    internal async Task<(object Item, double Y)> ReviewScrollToEarlierAsync()
+    {
+        TrackTranscriptScroll(); _loadingEarlier = true; _following = false;
+        _messageScroll!.ChangeView(null, 150, null, true); await SettleAsync();
+        var anchor = ScrollAnchor.Capture(MessageList)!; _loadingEarlier = false;
+        // This is the same upward gesture entry point used by pointer wheel and keyboard input.
+        RequestEarlier(); return (anchor.Item, anchor.Y);
+    }
+    internal double ReviewItemY(object item) => ((FrameworkElement)MessageList.ContainerFromItem(item)).TransformToVisual(MessageList).TransformPoint(new(0, 0)).Y;
+    internal async Task<(ListView List, object Item, double Y)> ReviewScrollToolHistoryAsync()
+    {
+        var group = FindVisual<ListView>(MessageList)!; var scroll = ScrollAnchor.FindScroll(group)!;
+        _loadingEarlier = true; _following = false; scroll.ChangeView(null, 150, null, true); await SettleAsync();
+        var anchor = ScrollAnchor.Capture(group)!; _loadingEarlier = false; RequestEarlier(); return (group, anchor.Item, anchor.Y);
+    }
+    internal Task ReviewUserInputAsync(CodexClient client, RpcMessage message) => HandleRequestAsync(client, message);
+    internal ContentDialog? ReviewInputDialog => VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Select(p => p.Child as ContentDialog ?? FindVisual<ContentDialog>(p.Child)).FirstOrDefault(d => d?.Content is ScrollViewer { Content: UserInputPanel });
     internal void ReviewAttachTranscriptServer(CodexClient client)
     { _client = client; ObserveClient(client); ApplyAttachedSession(_selected!, _selected! with { IsLive = true, State = SessionState.Active }); }
     internal Task ReviewDisconnectTranscriptServer() => ConnectAsync();

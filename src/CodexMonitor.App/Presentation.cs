@@ -67,7 +67,7 @@ public sealed partial class SessionRow(SessionInfo session, LocalizationService 
     public override string ToString() => AccessibleName;
 }
 [WinRT.GeneratedBindableCustomProperty]
-public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null) : INotifyPropertyChanged
+public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, Action? earlier = null) : INotifyPropertyChanged
 {
     public TranscriptEntry Entry { get; private set; } = entry;
     public LocalizationService Text { get; private set; } = text;
@@ -77,24 +77,38 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
     public Dictionary<string, double> ScrollOffsets { get; } = scrollOffsets ?? [];
     public Action<bool>? HistoryChanged { get; private set; } = historyChanged;
     public Func<bool>? CanFollow { get; private set; } = canFollow;
+    public Action? Earlier { get; private set; } = earlier;
     public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning or EntryKind.Event;
     public string ActivityTitle => Text.Format("Activities", Text.Number(Activities.Count));
+    public bool IsGroupCollapsed => Expanded.Contains(Entry.Id + ":group:collapsed");
+    public bool IsGroupBusy => IsLive && Activities.Any(e => e.Tool?.State is ToolActivityState.Running or ToolActivityState.Generating);
+    public string ActivitySummary => string.Join(" · ", Activities.GroupBy(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.State == ToolActivityState.Generating ? "Working" : e.Tool?.CategoryKey ?? "Tool")
+        .Take(4).Select(g => Text[g.Key] + " " + Text.Number(g.Count()))) + (Activities.Select(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.CategoryKey ?? "Tool").Distinct().Count() > 4 ? " · …" : "");
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
     public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
         (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
         { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
-        Role + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
+        Role + (Entry.Kind == EntryKind.Assistant && Entry.Model is { Length: > 0 } model ? ", " + Text["FieldModel"] + " " + model : "") + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Update(EntryRow next)
-    { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; PropertyChanged?.Invoke(this, new(null)); }
+    { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; PropertyChanged?.Invoke(this, new(null)); }
     public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities);
-    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null)
+    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, string? liveTurnId = null, Dictionary<string, string>? groupIdentities = null, Action? earlier = null)
     {
         var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
-        void Flush() { if (tools.Count > 0) { rows.Add(new(tools[0], text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow)); tools.Clear(); } }
+        var usedIds = new HashSet<string>(StringComparer.Ordinal);
+        void Flush()
+        {
+            if (tools.Count == 0) return;
+            var identity = tools.Select(e => groupIdentities?.GetValueOrDefault(e.Id)).FirstOrDefault(id => id is not null && !usedIds.Contains(id)) ?? tools[0].Id;
+            usedIds.Add(identity);
+            if (groupIdentities is not null) foreach (var tool in tools) groupIdentities[tool.Id] = identity;
+            rows.Add(new(tools[0] with { Id = identity }, text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow, rows.Count == 0 ? earlier : null)); tools.Clear();
+        }
         foreach (var item in entries)
         {
+            if (tools.Count > 0 && tools[^1].TurnId is { Length: > 0 } previousTurn && item.TurnId is { Length: > 0 } nextTurn && previousTurn != nextTurn) Flush();
             if (item.Kind == EntryKind.Reasoning && string.IsNullOrWhiteSpace(item.Text)) continue;
             if (item.Kind is EntryKind.Tool or EntryKind.Reasoning or EntryKind.Event)
             {
@@ -107,7 +121,11 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
             }
             else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live, scrollOffsets: scrollOffsets, historyChanged: historyChanged, canFollow: canFollow)); }
         }
-        Flush(); return rows;
+        Flush();
+        var lastActivity = rows.LastOrDefault(r => r.IsActivityGroup);
+        if (live) foreach (var row in rows.Where(r => r.IsActivityGroup))
+            row.IsLive = liveTurnId is { Length: > 0 } && row.Activities.Any(e => e.TurnId == liveTurnId) || ReferenceEquals(row, lastActivity) && row.Activities.All(e => string.IsNullOrEmpty(e.TurnId));
+        return rows;
     }
     public override string ToString() => AccessibleName;
 }
@@ -168,16 +186,16 @@ public sealed partial class TranscriptCard : UserControl
     private void RowUpdated(object? sender, PropertyChangedEventArgs args) => RefreshContent();
     private void RefreshContent()
     {
-        if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ListView list } && list.ItemsSource is ObservableCollection<EntryRow> children &&
-            children.Count > 0 && children[0].Entry.Id == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
+        if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ActivityGroupView group } && group.List is ListView list && list.ItemsSource is ObservableCollection<EntryRow> children &&
+            children.Count > 0 && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
         {
             var scroll = ScrollViewerIn(list); var follow = next.CanFollow?.Invoke() == true && (scroll is null || scroll.ScrollableHeight - scroll.VerticalOffset < 24);
             var incoming = next.Activities.Select(entry => new EntryRow(entry, next.Text, expanded: next.Expanded, live: next.IsLive, scrollOffsets: next.ScrollOffsets, historyChanged: next.HistoryChanged, canFollow: next.CanFollow)).ToArray();
-            var common = Math.Min(children.Count, incoming.Length);
-            for (int i = 0; i < common; i++) if (!children[i].Matches(incoming[i])) children[i].Update(incoming[i]);
-            while (children.Count > incoming.Length) children.RemoveAt(children.Count - 1);
-            for (int i = common; i < incoming.Length; i++) children.Add(incoming[i]);
-            if (follow && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); });
+            var anchor = !follow && incoming.Length > children.Count ? ScrollAnchor.Capture(list) : null;
+            EntryRows.Synchronize(children, incoming);
+            group.Update(next);
+            anchor?.Restore();
+            if (follow && !next.IsGroupCollapsed && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); });
             return;
         }
         var hadFocus = IsLoaded && AccessibilitySupport.ContainsFocus(this);
@@ -228,6 +246,7 @@ public sealed partial class TranscriptCard : UserControl
     }
     internal static void ScrollGroupToEnd(DependencyObject container, EntryRow row)
     {
+        if (row.IsGroupCollapsed) return;
         if (row.Activities.Count > 1 && ScrollViewerIn(container) is { } scroll)
         { scroll.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); }
     }
@@ -245,7 +264,14 @@ public sealed partial class TranscriptCard : UserControl
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         var role = new TextBlock { Text = row.Role, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        header.Children.Add(role);
+        var identity = new Grid { ColumnSpacing = 8 }; identity.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); identity.ColumnDefinitions.Add(new()); identity.Children.Add(role);
+        if (entry.Kind == EntryKind.Assistant && entry.Model is { Length: > 0 } model)
+        {
+            var modelLabel = new TextBlock { Text = model, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, FlowDirection = FlowDirection.LeftToRight, TextAlignment = row.Text.IsRightToLeft ? TextAlignment.Right : TextAlignment.Left };
+            modelLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush"); ToolTipService.SetToolTip(modelLabel, model);
+            AutomationProperties.SetName(modelLabel, row.Text["FieldModel"] + ": " + model); Grid.SetColumn(modelLabel, 1); identity.Children.Add(modelLabel);
+        }
+        header.Children.Add(identity);
         var time = new TextBlock { Text = row.Time, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 };
         time.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         Grid.SetColumn(time, 1); header.Children.Add(time);
@@ -291,11 +317,16 @@ public sealed partial class TranscriptCard : UserControl
         list.Loaded += (_, _) =>
         {
             var scroll = ScrollViewerIn(list); if (scroll is null) return;
-            var restoring = true;
+            var restoring = true; var previousOffset = scroll.VerticalOffset;
             scroll.ViewChanged += (_, args) =>
             {
                 if (!restoring && !args.IsIntermediate && list.IsLoaded && scroll.ScrollableHeight > 0)
-                { row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset; if (userScrolling) row.HistoryChanged?.Invoke(scroll.ScrollableHeight - scroll.VerticalOffset > 24); }
+                {
+                    row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
+                    if (userScrolling) row.HistoryChanged?.Invoke(scroll.ScrollableHeight - scroll.VerticalOffset > 24);
+                    if (userScrolling && scroll.VerticalOffset < previousOffset && scroll.VerticalOffset < 160) row.Earlier?.Invoke();
+                }
+                previousOffset = scroll.VerticalOffset;
             };
             EventHandler<object>? layout = null;
             layout = (_, _) =>
@@ -307,7 +338,7 @@ public sealed partial class TranscriptCard : UserControl
             list.LayoutUpdated += layout;
             list.Unloaded += (_, _) => list.LayoutUpdated -= layout;
         };
-        return list;
+        return new ActivityGroupView(row, list);
     }
     private static ScrollViewer? ScrollViewerIn(DependencyObject root)
     {
@@ -323,6 +354,15 @@ public sealed partial class TranscriptCard : UserControl
     }
     private static FrameworkElement ToolRow(TranscriptEntry entry, EntryRow row)
     {
+        if (entry.Tool?.State == ToolActivityState.Generating)
+        {
+            var working = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(10, 8, 10, 8) };
+            var ring = new ProgressRing { Width = 16, Height = 16, IsActive = row.IsLive, Visibility = row.IsLive ? Visibility.Visible : Visibility.Collapsed };
+            AutomationProperties.SetName(ring, row.Text["Working"]); working.Children.Add(ring);
+            working.Children.Add(new TextBlock { Text = row.Text[row.IsLive ? "Working" : "IncompleteActivity"], VerticalAlignment = VerticalAlignment.Center });
+            AutomationProperties.SetName(working, row.Text[row.IsLive ? "Working" : "IncompleteActivity"]); AutomationProperties.SetAutomationId(working, "Working-" + entry.Id);
+            return working;
+        }
         if (entry.Kind == EntryKind.Reasoning)
         {
             var panel = new StackPanel { Spacing = 4 };

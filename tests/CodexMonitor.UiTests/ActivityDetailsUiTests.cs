@@ -28,7 +28,7 @@ public sealed class ActivityDetailsUiTests
         var visibleText = string.Join("\n", window.ReviewVisualElements<TextBlock>().Select(t => t.Text));
         StringAssert.Contains(visibleText, expected); Assert.IsFalse(visibleText.Contains("\"type\":")); Assert.IsFalse(visibleText.Contains("\"arguments\":"));
         var disclosures = window.ReviewVisualElements<ActivityDisclosure>();
-        Assert.IsFalse(disclosures.Any(d => AutomationProperties.GetAutomationId(d).Contains("public-summary")), "The reasoning summary must be directly readable");
+        Assert.IsFalse(disclosures.Any(d => AutomationProperties.GetAutomationId(d) == "ActivityToggle-public-summary"), "The reasoning summary must be directly readable");
         Assert.IsTrue(window.ReviewVisualElements<RichTextBlock>().Count > 0, "The inline summary must render as readable text");
         Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])), "Adapted content should not need a raw-data fallback");
         foreach (var (_, bounds) in window.ReviewBounds()) Assert.IsTrue(bounds.Right <= window.ReviewRoot.ActualWidth + 1 && bounds.Bottom <= window.ReviewRoot.ActualHeight + 1);

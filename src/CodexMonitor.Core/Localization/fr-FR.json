@@ -258,5 +258,17 @@
   "EventSession": "Mise à jour de session",
   "EventRealtime": "Session en temps réel",
   "EventConfiguration": "Mise à jour de la configuration",
-  "EventConnection": "Mise à jour de la connexion"
+  "EventConnection": "Mise à jour de la connexion",
+  "ActivityGroup": "Activité",
+  "ActivityGroupHelp": "Réduire ou développer ce groupe d’activités.",
+  "Working": "En cours",
+  "IncompleteActivity": "Activité inachevée",
+  "ReconnectSession": "Se reconnecter",
+  "ReconnectSessionExplanation": "Les informations sur le tour sont indisponibles. Reconnectez-vous pour recharger l’état en direct et la transcription, puis envoyer des messages ou guider le tour en cours.",
+  "UserInputTitle": "Votre réponse est nécessaire",
+  "UserInputHint": "Codex poursuivra cette conversation après votre réponse.",
+  "SubmitAnswers": "Envoyer les réponses",
+  "OtherAnswer": "Autre réponse",
+  "AnswerPlaceholder": "Saisissez votre réponse",
+  "LoadingEarlier": "Chargement du contenu précédent…"
 }

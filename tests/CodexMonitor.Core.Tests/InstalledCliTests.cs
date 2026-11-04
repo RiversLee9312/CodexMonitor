@@ -18,7 +18,14 @@ public sealed class InstalledCliTests
         foreach (var server in result.Where(s => s.CanConnect))
         {
             await using var client = await SessionServerLocator.OpenAsync(server, LocalSessionStore.DefaultHome, "codex", CancellationToken.None);
-            Assert.IsNotNull(await client.LoadedThreadIdsAsync());
+            var loaded = await client.LoadedThreadIdsAsync(); Assert.IsNotNull(loaded);
+            if (loaded.FirstOrDefault() is { } id)
+            {
+                var page = await client.ReadTranscriptPageAsync(id);
+                Assert.IsTrue(page.Entries.Count <= 100, "The real server must respect the item page limit");
+                if (page.NextCursor is not null) Assert.IsNotNull(await client.ReadTranscriptPageAsync(id, page.NextCursor));
+                Console.WriteLine("Read bounded item pages from an existing loaded thread; no resume or turns started.");
+            }
         }
     }
     [TestMethod]

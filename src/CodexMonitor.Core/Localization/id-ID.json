@@ -258,5 +258,17 @@
   "EventSession": "Pembaruan sesi",
   "EventRealtime": "Sesi waktu nyata",
   "EventConfiguration": "Pembaruan konfigurasi",
-  "EventConnection": "Pembaruan koneksi"
+  "EventConnection": "Pembaruan koneksi",
+  "ActivityGroup": "Aktivitas",
+  "ActivityGroupHelp": "Ciutkan atau perluas grup aktivitas ini.",
+  "Working": "Sedang bekerja",
+  "IncompleteActivity": "Aktivitas belum selesai",
+  "ReconnectSession": "Hubungkan kembali",
+  "ReconnectSessionExplanation": "Informasi giliran tidak tersedia. Hubungkan kembali untuk memuat ulang status langsung dan transkrip agar Anda dapat mengirim pesan atau mengarahkan giliran saat ini.",
+  "UserInputTitle": "Jawaban Anda diperlukan",
+  "UserInputHint": "Codex akan melanjutkan percakapan ini setelah Anda menjawab.",
+  "SubmitAnswers": "Kirim jawaban",
+  "OtherAnswer": "Jawaban lain",
+  "AnswerPlaceholder": "Masukkan jawaban",
+  "LoadingEarlier": "Memuat konten sebelumnya…"
 }

@@ -38,3 +38,9 @@ Apple HIG 的 Writing 指南用于文案原则：按钮使用简短动词、错�
 最终提示词：
 
 > Use case: logo-brand. Asset type: production Windows 11 desktop app icon for Codex Monitor, a quiet native tool for reading agent conversation transcripts. Create ONE icon, centered, on a truly transparent background, square 1024 composition. An elegant simple Fluent Design symbol: two slim upright rounded transcript panes slightly offset, front pane formed from softly rounded pale porcelain material with three dark charcoal horizontal message strokes; one small restrained azure accent at the lower edge suggesting live activity. Clear silhouette, crisp geometry, tiny amount of soft dimensional lighting in Microsoft Fluent app icon tradition, polished and understated, legible at 24 pixels, balanced generous transparent padding, symbol occupies 78% of image. No text, no letters, no OpenAI logo, no badge, no outer square tile, no decorative sparkles, no background, no tiny details. Strong edge separation on both light and dark backgrounds.
+
+工具组默认展开，标题可收起为工具类别及数量概括；仅正在进行的组在收起时显示进度环。可观测的非消息、非推理生成阶段使用同一“工作中”占位，生成完成后原位替换，不显示半截参数。每条 Codex 回复标题旁显示实际可用的模型记录，缺失时留空。
+
+历史记录从尾部开始，本地每页约 300 条 JSONL 记录（通常不超过 2 MiB），服务器使用 thread/items/list 的 100 项游标页，避免巨型单轮被整体水合。向上滚动接近已加载范围起点时自动预取；按稳定消息 ID 合并，保留外层和工具组内第一条可见内容的像素位置。没有额外的“加载更早内容”按钮。
+
+运行时尚未提供轮次时，底部显示说明与“重新连接”按钮。Codex 提问采用原生对话框，无预选答案，显式提交；保密字段使用 PasswordBox，失效或断线自动关闭，不提交陈旧回答。所有新文案覆盖 22 种语言。

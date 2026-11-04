@@ -22,14 +22,14 @@ public sealed class TranscriptSourceUiTests
         {
             using var document = JsonDocument.Parse(value); var request = document.RootElement;
             if (request.Field("id").ValueKind == JsonValueKind.Undefined) return;
-            var response = request.Str("method") == "thread/turns/list" ? await Snapshot.Task.WaitAsync(ct) : new JsonObject { ["data"] = new JsonArray() };
+            var response = request.Str("method") == "thread/items/list" ? await Snapshot.Task.WaitAsync(ct) : new JsonObject { ["data"] = new JsonArray() };
             _messages.Writer.TryWrite(new JsonObject { ["id"] = JsonNode.Parse(request.Field("id").GetRawText()), ["result"] = response.DeepClone() }.ToJsonString());
         }
         public void Notify(string delta) => _messages.Writer.TryWrite(new JsonObject { ["method"] = "item/agentMessage/delta", ["params"] = new JsonObject { ["threadId"] = "review-session", ["itemId"] = "server-item", ["delta"] = delta } }.ToJsonString());
         public void Drop() => _messages.Writer.TryComplete();
         public async Task<string?> ReceiveAsync(CancellationToken ct) { try { return await _messages.Reader.ReadAsync(ct); } catch (ChannelClosedException) { return null; } }
         public ValueTask DisposeAsync() { Drop(); return ValueTask.CompletedTask; }
-        public void Complete(string text) => Snapshot.TrySetResult(new JsonObject { ["data"] = new JsonArray(new JsonObject { ["items"] = new JsonArray(new JsonObject { ["id"] = "server-item", ["type"] = "agentMessage", ["text"] = text }) }) });
+        public void Complete(string text) => Snapshot.TrySetResult(new JsonObject { ["data"] = new JsonArray(new JsonObject { ["turnId"] = "turn", ["item"] = new JsonObject { ["id"] = "server-item", ["type"] = "agentMessage", ["text"] = text } }) });
     }
     private async Task<string> LocalFile(string text)
     {

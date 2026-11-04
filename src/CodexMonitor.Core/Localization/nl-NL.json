@@ -258,5 +258,17 @@
   "EventSession": "Sessie-update",
   "EventRealtime": "Realtime sessie",
   "EventConfiguration": "Configuratie-update",
-  "EventConnection": "Verbindingsupdate"
+  "EventConnection": "Verbindingsupdate",
+  "ActivityGroup": "Activiteit",
+  "ActivityGroupHelp": "Deze activiteitengroep in- of uitklappen.",
+  "Working": "Aan het werk",
+  "IncompleteActivity": "Onvoltooide activiteit",
+  "ReconnectSession": "Opnieuw verbinden",
+  "ReconnectSessionExplanation": "Beurtinformatie is niet beschikbaar. Maak opnieuw verbinding om de live status en het transcript opnieuw te laden, zodat je berichten kunt verzenden of de huidige beurt kunt bijsturen.",
+  "UserInputTitle": "Je antwoord is nodig",
+  "UserInputHint": "Codex gaat na je antwoord verder met dit gesprek.",
+  "SubmitAnswers": "Antwoorden verzenden",
+  "OtherAnswer": "Ander antwoord",
+  "AnswerPlaceholder": "Typ je antwoord",
+  "LoadingEarlier": "Eerdere inhoud laden…"
 }
