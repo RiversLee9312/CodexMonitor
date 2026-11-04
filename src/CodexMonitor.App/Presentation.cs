@@ -188,10 +188,20 @@ public sealed partial class TranscriptCard : UserControl
     public EntryRow? Row { get => (EntryRow?)GetValue(RowProperty); set => SetValue(RowProperty, value); }
     private EntryRow? _observed;
     private EntryRow? _rendered;
+    private TranscriptEntry? _renderedEntry;
+    private IReadOnlyList<TranscriptEntry>? _renderedActivities;
+    private string? _renderedLanguage;
+    private bool _renderedLive;
     public TranscriptCard()
     {
-        Loaded += (_, _) => { Observe(); if (!ReferenceEquals(_rendered, Row)) RefreshContent(); AccessibilitySupport.NormalizeIconsAfterLayout(this); };
-        Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; _rendered = null; };
+        Loaded += (_, _) =>
+        {
+            Observe();
+            if (Row is { } row && (!ReferenceEquals(_rendered, row) || !ReferenceEquals(_renderedEntry, row.Entry) ||
+                !ReferenceEquals(_renderedActivities, row.Activities) || _renderedLanguage != row.Text.LanguageTag || _renderedLive != row.IsLive)) RefreshContent();
+            AccessibilitySupport.NormalizeIconsAfterLayout(this);
+        };
+        Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; };
     }
     private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e)
     { var card = (TranscriptCard)d; card.Observe(); card.RefreshContent(); }
@@ -206,6 +216,7 @@ public sealed partial class TranscriptCard : UserControl
     private void RefreshContent()
     {
         _rendered = Row;
+        _renderedEntry = Row?.Entry; _renderedActivities = Row?.Activities; _renderedLanguage = Row?.Text.LanguageTag; _renderedLive = Row?.IsLive == true;
         if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ActivityGroupView group } && group.List is ListView list && list.ItemsSource is ObservableCollection<EntryRow> children &&
             children.Count > 0 && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
         {
