@@ -12,6 +12,19 @@ namespace CodexMonitor.UiTests;
 public sealed class SessionListTests
 {
     public TestContext TestContext { get; set; } = null!;
+    [UITestMethod]
+    public async Task ImportingTwoHundredServerSessionsKeepsTheOriginalVisibleRows()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Light", "zh-CN");
+        var sessions = Enumerable.Range(0, 50).Select(i => new SessionInfo { Id = "local" + i, Title = "Local session " + i, State = SessionState.Completed }).ToArray();
+        window.ApplySessionReviewSnapshot(sessions); window.ReadReviewSession("local0");
+        var before = await window.SessionAnchorReviewAsync("local0", true);
+        var imported = Enumerable.Range(0, 200).Select(i => new SessionInfo { Id = "server" + i, Title = "Server session " + i, State = SessionState.Idle });
+        window.ApplySessionReviewSnapshot(imported.Concat(sessions).ToArray());
+        await MainWindow.SettleAsync();
+        var after = await window.SessionAnchorReviewAsync("local0"); Assert.AreEqual(before, after, 2d);
+        TestContext.AddResultFile(await window.CaptureReviewAsync("bulk-server-session-anchor"));
+    }
 
     [UITestMethod]
     public async Task TranscriptUpdatesPreserveRowsSelectionOrderAndCollectionWithoutAnimations()

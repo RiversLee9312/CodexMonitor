@@ -37,6 +37,7 @@ internal static class ActivityDetails
         if (!string.IsNullOrEmpty(tool.StandardInput)) Add(text["ToolStdin"], Prose(tool.StandardInput, true), tool.StandardInput);
         if (tool.CategoryKey == "ToolFileChanges") Add(text["ToolFileChanges"], Diff(tool.Input));
         else if (tool.CategoryKey == "ToolDetails" && TryJson(tool.Input, out var unknown)) panel.Children.Add(Original(unknown, text));
+        else if (!string.IsNullOrWhiteSpace(tool.Input) && (tool.CategoryKey == "ToolCommand" || tool.Name == "commandExecution")) Add(text["ToolCommand"], Prose(tool.DecodedInput, true), tool.DecodedInput);
         else if (tool.CategoryKey == "ToolPlan" && TryJson(tool.Input, out var plan) && plan.Field("plan").ValueKind == JsonValueKind.Array)
         {
             if (plan.Str("explanation").Length > 0) panel.Children.Add(Prose(plan.Str("explanation")));

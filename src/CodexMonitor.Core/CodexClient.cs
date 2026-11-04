@@ -12,7 +12,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.7" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.8" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new JsonObject(), ct).ConfigureAwait(false);
     }
@@ -64,7 +64,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     }
     public async Task<SessionInfo> ResumeAsync(string id, CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("thread/resume", new JsonObject { ["threadId"] = id, ["includeTurns"] = false }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("thread/resume", new JsonObject { ["threadId"] = id, ["excludeTurns"] = true }, ct).ConfigureAwait(false);
         return ParseSession(result.Field("thread"));
     }
     public async Task<SessionInfo> StartAsync(string cwd, CancellationToken ct = default)

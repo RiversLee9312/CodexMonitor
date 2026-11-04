@@ -26,17 +26,22 @@ public sealed class ProtocolParityUiTests
         TestContext.AddResultFile(await window.CaptureReviewAsync($"theme-reading-anchor-{theme}-{language}"));
     }
     [UITestMethod]
-    [DataRow("Light", "zh-CN")]
-    [DataRow("Dark", "ar-SA")]
-    public async Task InternalCommandArraysHaveReadableHeadersAndExpandedOutput(string theme, string language)
+    [DataRow("Light", "zh-CN", false)]
+    [DataRow("Dark", "ar-SA", false)]
+    [DataRow("Light", "zh-CN", true)]
+    [DataRow("Dark", "ar-SA", true)]
+    public async Task InternalCommandArraysHaveReadableHeadersAndExpandedOutput(string theme, string language, bool wrapped)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
         using var document = JsonDocument.Parse("""{"id":"command","type":"CommandExecution","command":["pwsh.exe","-Command","Write-Output \"Hello world\""],"aggregated_output":"Hello world","status":"Completed","duration":{"secs":1,"nanos":200000000}}""");
-        await window.ShowProtocolEntryReviewAsync(CodexClient.ParseItem(document.RootElement));
+        var entry = CodexClient.ParseItem(document.RootElement);
+        if (wrapped) entry = entry with { Tool = ToolActivity.FromCall("exec", """text(await tools.exec_command({cmd:"Write-Output \"Hello world\""}));""", "Hello world", ToolActivityState.Completed) };
+        await window.ShowProtocolEntryReviewAsync(entry);
         Assert.IsTrue(window.ReviewVisualElements<TextBlock>().Any(block => block.Text.Contains("Write-Output", StringComparison.Ordinal)));
         Assert.IsTrue(window.ReviewVisualElements<TextBlock>().Any(block => block.Text == "Hello world"));
+        Assert.IsFalse(window.ReviewVisualElements<TextBlock>().Any(block => block.Text.Contains("tools.exec_command", StringComparison.Ordinal)), "Adapted command details should show the command rather than its orchestration wrapper");
         Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])));
-        TestContext.AddResultFile(await window.CaptureReviewAsync($"native-command-array-{theme}-{language}"));
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"native-command-array-{theme}-{language}-{wrapped}"));
     }
     [UITestMethod]
     [DataRow("Light", "zh-CN")]

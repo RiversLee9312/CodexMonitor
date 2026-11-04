@@ -66,7 +66,8 @@ public sealed class SessionServerTests
     {
         var transport = new FakeTransport(); await using var client = new CodexClient(new JsonRpcClient(transport));
         var pending = client.ResumeAsync("target"); var request = await transport.SentAsync();
-        Assert.AreEqual("thread/resume", request.Str("method")); Assert.IsFalse(request.Field("params").Field("includeTurns").GetBoolean());
+        Assert.AreEqual("thread/resume", request.Str("method")); Assert.IsTrue(request.Field("params").Field("excludeTurns").GetBoolean());
+        Assert.AreEqual(JsonValueKind.Undefined, request.Field("params").Field("includeTurns").ValueKind);
         Assert.AreEqual(JsonValueKind.Undefined, request.Field("params").Field("model").ValueKind);
         transport.Reply(request, new { thread = new { id = "target", status = new { type = "active" } } });
         Assert.AreEqual(SessionState.Active, (await pending).State);

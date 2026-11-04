@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
     private long _transcriptReadGeneration;
     private ServerRead? _serverRead;
     private readonly Dictionary<string, TranscriptEntry> _serverEvents = [];
+    private long _sessionAnchorGeneration, _sessionAnchorInputVersion;
     private sealed record ServerRead(CodexClient Client, string SessionId, long Generation, List<RpcMessage> Messages);
     private Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> _readLocalTranscript = (session, ct) => new TranscriptParser().ReadAsync(session, ct);
     private readonly Microsoft.UI.System.ThemeSettings _themeSettings;
@@ -75,6 +76,9 @@ public sealed partial class MainWindow : Window
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
         _text = new(_settings.Language); _store = new(_settings.CodexHome);
         InitializeComponent();
+        SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => _sessionAnchorInputVersion++), true);
+        SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => _sessionAnchorInputVersion++), true);
+        SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => _sessionAnchorInputVersion++), true);
         _themeSettings = Microsoft.UI.System.ThemeSettings.CreateForWindowId(AppWindow.Id);
         _themeSettings.Changed += OnSystemThemeChanged;
         Root.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(Root);
@@ -280,6 +284,12 @@ public sealed partial class MainWindow : Window
     private void ApplyFilter(bool force = false)
     {
         if (!_ready) return;
+        var anchorGeneration = ++_sessionAnchorGeneration;
+        var inputVersion = _sessionAnchorInputVersion;
+        SessionRow? anchor = null; double anchorY = 0;
+        if (SessionList.ItemsPanelRoot is ItemsStackPanel { FirstVisibleIndex: >= 0 } panel && panel.FirstVisibleIndex < _visibleSessionRows.Count &&
+            SessionList.ContainerFromIndex(panel.FirstVisibleIndex) is FrameworkElement first)
+        { anchor = _visibleSessionRows[panel.FirstVisibleIndex]; anchorY = first.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y; }
         var incoming = _sessions.ToDictionary(s => s.Id);
         var removed = _sessionOrder.Where(id => !incoming.ContainsKey(id)).ToArray();
         var added = _sessions.Where(s => !_sessionRows.ContainsKey(s.Id)).ToArray();
@@ -313,6 +323,29 @@ public sealed partial class MainWindow : Window
             if (_selected is not null) SessionList.SelectedItem = visible.FirstOrDefault(x => x.Session.Id == _selected.Id);
         }
         finally { _syncing = false; }
+        if (anchor is not null && (added.Length > 0 || removed.Length > 0) && _visibleSessionRows.Contains(anchor))
+        {
+            var captured = anchor;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
+            {
+                if (_closing || anchorGeneration != _sessionAnchorGeneration || inputVersion != _sessionAnchorInputVersion) return;
+                SessionList.ScrollIntoView(captured, ScrollIntoViewAlignment.Leading);
+                for (int attempt = 0; attempt < 8; attempt++)
+                {
+                    if (_closing || anchorGeneration != _sessionAnchorGeneration || inputVersion != _sessionAnchorInputVersion) return;
+                    SessionList.UpdateLayout();
+                    if (SessionList.ContainerFromItem(captured) is FrameworkElement current)
+                    {
+                        var y = current.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y;
+                        DependencyObject? parent = SessionList.ItemsPanelRoot;
+                        while (parent is not null && parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
+                        if (parent is ScrollViewer scroll) scroll.ChangeView(null, scroll.VerticalOffset + y - anchorY, null, true);
+                        return;
+                    }
+                    await Task.Delay(16);
+                }
+            });
+        }
         NoSessionsPanel.Visibility = visible.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         SessionCount.Text = _text.Format("SessionCount", visible.Length);
         if (announceNew) AccessibilitySupport.Announce(SessionCount, _text.Format("NewSessionsAvailable", _text.Number(added.Length)), "new-sessions");
