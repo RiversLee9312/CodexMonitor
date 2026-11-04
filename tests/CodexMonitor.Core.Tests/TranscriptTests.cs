@@ -16,13 +16,29 @@ public sealed class TranscriptTests
         return await new TranscriptParser().ReadAsync(new SessionInfo { Id = "s", FilePath = path });
     }
     [TestMethod]
+    public async Task ProgramBatchConsumesEachNativeMirrorOnceAndRetainsTheProgramOutput()
+    {
+        const string code = "await Promise.all(['git status','git status'].map(async cmd=>text(await tools.exec_command({cmd}))));";
+        var result = await Parse(
+            JsonSerializer.Serialize(new { type = "response_item", payload = new { type = "custom_tool_call", call_id = "batch", name = "exec", input = code } }),
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"one","command":["git","status"],"status":"Completed","aggregated_output":"First"}}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"two","command":["git","status"],"status":"Completed","aggregated_output":"Second"}}}""",
+            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"three","command":["git","status"],"status":"Completed","aggregated_output":"Separate real execution"}}}""",
+            """{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"batch","output":"Program aggregate"}}""");
+        Assert.HasCount(2, result.Entries); var parent = result.Entries[0].Tool!;
+        Assert.AreEqual(code, parent.Input); Assert.AreEqual("Program aggregate", parent.Output); Assert.HasCount(2, parent.DisplayCalls!);
+        CollectionAssert.AreEqual(new[] { "First", "Second" }, parent.DisplayCalls!.Select(call => call.Output).ToArray());
+        Assert.AreEqual("Separate real execution", result.Entries[1].Tool!.Output);
+    }
+    [TestMethod]
     public async Task WrappedCommandsAndInternalArgvMirrorsAppearOnceAndKeepFinalTiming()
     {
         var result = await Parse(
             """{"type":"response_item","payload":{"type":"custom_tool_call","call_id":"wrapper","name":"exec","input":"text(await tools.exec_command({cmd:\"git status\"}));"}}""",
             """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"different-native-id","command":["C:/Program Files/PowerShell/7/pwsh.exe","-Command","git status"],"status":"Completed","aggregated_output":"Clean","exit_code":0,"duration":{"secs":2,"nanos":0}}}}""",
-            """{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":"Clean"}}""");
-        Assert.HasCount(1, result.Entries); Assert.AreEqual("git status", result.Entries[0].Tool?.Summary); Assert.AreEqual(2000L, result.Entries[0].Tool?.DurationMs); Assert.AreEqual("Clean", result.Entries[0].Tool?.Output);
+            """{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"wrapper","output":"Original orchestration envelope"}}""");
+        Assert.HasCount(1, result.Entries); Assert.AreEqual("git status", result.Entries[0].Tool?.Summary); Assert.AreEqual(2000L, result.Entries[0].Tool?.DurationMs);
+        Assert.AreEqual("Original orchestration envelope", result.Entries[0].Tool?.Output); Assert.AreEqual("Clean", result.Entries[0].Tool?.DisplayOutput);
     }
     [TestMethod]
     public async Task WireMatchedItemsDoNotConsumeAnotherIdenticalRealExecutionOrDuplicatePatchMirrors()

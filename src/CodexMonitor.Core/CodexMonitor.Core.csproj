@@ -2,4 +2,7 @@
   <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
   <ItemGroup><EmbeddedResource Include="Localization\*.json" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="Licenses\*.json" /></ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Acornima" Version="1.9.1" />
+  </ItemGroup>
 </Project>

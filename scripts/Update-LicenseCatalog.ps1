@@ -10,13 +10,15 @@ function Add-Package([string]$name, [string]$version, [string]$folder) {
     [xml]$xml = Get-Content -LiteralPath $spec.FullName
     $metadata = $xml.package.metadata
     $licenseNode = $metadata.license
+    $pinned = Join-Path $repo "third-party\$name\$version"
     $license = if ($licenseNode.type -eq 'file') { Get-Content -LiteralPath (Join-Path $folder $licenseNode.InnerText) -Raw } else {
-        $file = Get-ChildItem -LiteralPath $folder -File | Where-Object Name -match '^LICENSE(\.(txt|md))?$' | Select-Object -First 1
+        $file = if (Test-Path -LiteralPath (Join-Path $pinned 'LICENSE.txt')) { Get-Item -LiteralPath (Join-Path $pinned 'LICENSE.txt') } else { Get-ChildItem -LiteralPath $folder -File | Where-Object Name -match '^LICENSE(\.(txt|md))?$' | Select-Object -First 1 }
         if ($file) { Get-Content -LiteralPath $file.FullName -Raw }
         elseif ($metadata.licenseUrl -and $metadata.licenseUrl -ne 'https://aka.ms/deprecateLicenseUrl') { '' }
         else { throw "No license text or original license link for $name" }
     }
     $notices = @(Get-ChildItem -LiteralPath $folder -File | Where-Object Name -match '^(THIRD.PARTY.NOTICES|NOTICE|NOTICES)(\.(txt|md))?$' | Sort-Object Name | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }) -join "`n`n"
+    if (Test-Path -LiteralPath (Join-Path $pinned 'NOTICE.txt')) { $notices += "`n" + (Get-Content -LiteralPath (Join-Path $pinned 'NOTICE.txt') -Raw) }
     $components.Add([ordered]@{ Name=$name; Version=$version; License=$(if($licenseNode.type -eq 'expression'){$licenseNode.InnerText}else{'License terms'}); Text=([string]$license).Trim(); Notices=$notices.Trim(); Source=$(if(!$license){$metadata.licenseUrl}else{"https://www.nuget.org/packages/$name/$version"}) })
 }
 foreach ($property in $assets.libraries.PSObject.Properties | Sort-Object Name) {

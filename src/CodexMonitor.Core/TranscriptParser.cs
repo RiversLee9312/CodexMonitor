@@ -147,6 +147,22 @@ public sealed class TranscriptParser
         for (int i = 0; i < entries.Count; i++)
             if (wireIds.TryGetValue(entries[i].Id, out var wireId) && nativeById.TryGetValue(wireId, out var mirror))
             { usedNative.Add(mirror.Id); matchedEntries.Add(i); entries[i] = mirror with { Id = entries[i].Id, Timestamp = entries[i].Timestamp }; }
+        // A batch is one orchestration record, but each native execution has its own item ID.
+        // Consume these mirrors once and attach observed lifecycle/output to the corresponding child.
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Tool is not { Program: { Complete: true, Calls.Count: > 1 } program } parent) continue;
+            var children = new List<ToolActivity>();
+            foreach (var call in program.Calls)
+            {
+                var child = ToolActivity.FromCall(call.Name, call.Input, state: ToolActivityState.Unknown);
+                var probe = entries[i] with { Tool = child };
+                var observed = nativeById.Values.FirstOrDefault(native => !usedNative.Contains(native.Id) && MirrorKey(native) == MirrorKey(probe));
+                if (observed?.Tool is { } nativeTool) { usedNative.Add(observed.Id); child = nativeTool; }
+                children.Add(child);
+            }
+            entries[i] = entries[i] with { Tool = parent with { DisplayCalls = children.ToArray() } };
+        }
         var mirrorTargets = entries.Select((entry, index) => (entry, index)).Where(pair => !matchedEntries.Contains(pair.index)).GroupBy(pair => MirrorKey(pair.entry)).ToDictionary(group => group.Key, group => new Queue<int>(group.Select(pair => pair.index)));
         foreach (var native in nativeById.Values.Where(entry => !usedNative.Contains(entry.Id)))
         {
@@ -154,6 +170,7 @@ public sealed class TranscriptParser
             usedNative.Add(native.Id);
             if (entries[index].Tool is { } original && native.Tool is { } final)
                 entries[index] = entries[index] with { Tool = original with { DurationMs = final.DurationMs ?? original.DurationMs, Output = original.Output ?? final.Output,
+                    DisplayOutput = final.Output is { Length: > 0 } ? final.Output : original.DisplayOutput,
                     State = final.State == ToolActivityState.Unknown || original.State == ToolActivityState.Failed ? original.State : final.State,
                     CategoryOverride = final.CategoryOverride ?? original.CategoryOverride, SummaryOverride = final.SummaryOverride ?? original.SummaryOverride } };
         }

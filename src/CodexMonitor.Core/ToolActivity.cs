@@ -1,18 +1,33 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Runtime.CompilerServices;
 
 namespace CodexMonitor.Core;
 
 public enum ToolActivityState { Unknown, Running, Completed, Failed, Interrupted }
 public sealed record ToolActivity(string Name, string Input, string? Output = null, ToolActivityState State = ToolActivityState.Running,
     long? DurationMs = null, string? SummaryOverride = null, string? CategoryOverride = null, int? AddedLines = null, int? RemovedLines = null,
-    string? Progress = null, string? StandardInput = null)
+    string? Progress = null, string? StandardInput = null, string? DisplayOutput = null, IReadOnlyList<ToolActivity>? DisplayCalls = null)
 {
+    private sealed record ProgramProjection(ToolProgram? Value);
+    private static readonly ConditionalWeakTable<ToolActivity, ProgramProjection> Programs = new();
+    public ToolProgram? Program => Programs.GetValue(this, static tool => new(tool.ReadProgram())).Value;
+    private ToolProgram? ReadProgram()
+    {
+        if (Name.Split('.').Last() is not ("exec" or "program" or "exec_js")) return null;
+        var code = Input;
+        try { using var doc = JsonDocument.Parse(code); code = doc.RootElement.Str("code", doc.RootElement.Str("input", code)); } catch (JsonException) { }
+        var program = ToolProgram.Parse(code);
+        return program.Calls.Count > 0 ? program : null;
+    }
+    private ToolActivity? ProgramCall => Program is { Complete: true, Calls.Count: 1 } program ? FromCall(program.Calls[0].Name, program.Calls[0].Input) : null;
+    public string DisplayInput => ProgramCall?.Input ?? Input;
     public long? WaitDurationMs
     {
         get
         {
+            if (ProgramCall is { } call) return call.WaitDurationMs;
             if (!Regex.IsMatch(Name, @"(?:^|[._:/])(?:sleep|wait)$", RegexOptions.IgnoreCase)) return null;
             try
             {
@@ -27,22 +42,18 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
     {
         get
         {
+            if (ProgramCall is { } call) return call.DecodedInput;
             var value = Input;
             try { using var document = JsonDocument.Parse(value); var root = document.RootElement; value = root.Str("cmd", root.Str("command", root.Str("code", root.Str("input", root.Str("query", root.Str("path", value)))))); }
             catch (JsonException) { }
-            var patch = Regex.Match(value, "apply_patch\\(\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
-            if (patch.Success) { try { return JsonSerializer.Deserialize(patch.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { } }
-            if (Name.Split('.').Last() is "exec" or "exec_command" || value.Contains("exec_command", StringComparison.Ordinal))
-            {
-                var command = Regex.Match(value, "(?:cmd|command)\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
-                if (command.Success) { try { return JsonSerializer.Deserialize(command.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { } }
-            }
             return value;
         }
     }
     public string CategoryKey => WaitDurationMs is not null ? "ToolWaiting" : CategoryOverride ?? InferCategory();
     private string InferCategory()
     {
+        if (ProgramCall is { } call) return call.CategoryKey;
+        if (Program is { } program) return program.Complete && program.Calls.All(c => FromCall(c.Name, c.Input).CategoryKey == "ToolCommand") ? "ToolCommand" : "ToolDynamic";
         if (WaitDurationMs is not null) return "ToolWaiting";
         if (Input.Contains("*** Begin Patch", StringComparison.Ordinal) || Name is "apply_patch" or "fileChange") return "ToolFileChanges";
         var name = Name.Split([".", "/", ":"], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? Name;
@@ -64,16 +75,13 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
     {
         get
         {
+            if (ProgramCall is { } call) return call.Summary;
+            if (Program is { } program) return program.Complete ? Compact(string.Join(" · ", program.Calls.Select(c => FromCall(c.Name, c.Input).Summary))) : "";
             if (SummaryOverride is not null) return Compact(SummaryOverride);
             if (WaitDurationMs is not null) return "";
             var value = DecodedInput;
             var file = Regex.Match(value, @"\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)");
             if (file.Success) return Path.GetFileName(file.Groups[1].Value.Trim().Replace('/', Path.DirectorySeparatorChar));
-            var command = Regex.Match(value, "(?:cmd|command)\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\")");
-            if (command.Success)
-            {
-                try { value = JsonSerializer.Deserialize(command.Groups[1].Value, CoreJsonContext.Default.String) ?? value; } catch (JsonException) { }
-            }
             if (CategoryKey == "ToolReadOutput") return "";
             return Compact(value);
         }
@@ -104,7 +112,7 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
             var added = edit.Diff.Split('\n').Count(l => l.StartsWith('+') && !l.StartsWith("+++", StringComparison.Ordinal));
             var removed = edit.Diff.Split('\n').Count(l => l.StartsWith('-') && !l.StartsWith("---", StringComparison.Ordinal));
             return this with { Input = edit.Diff, SummaryOverride = Path.GetFileName(edit.Path.Replace('/', Path.DirectorySeparatorChar)), CategoryOverride = "ToolFileChanges",
-                AddedLines = added + removed > 0 ? added : null, RemovedLines = added + removed > 0 ? removed : null };
+                Name = "fileChange", AddedLines = added + removed > 0 ? added : null, RemovedLines = added + removed > 0 ? removed : null };
         }).ToArray();
     }
     public static ToolActivityState CompletedState(string output)

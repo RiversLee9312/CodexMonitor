@@ -35,7 +35,23 @@ internal static class ActivityDetails
         panel.Loaded += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(panel);
         if (!string.IsNullOrWhiteSpace(tool.Progress)) Add(text["FieldMessage"], Prose(tool.Progress), tool.Progress);
         if (!string.IsNullOrEmpty(tool.StandardInput)) Add(text["ToolStdin"], Prose(tool.StandardInput, true), tool.StandardInput);
-        if (tool.CategoryKey == "ToolFileChanges") Add(text["ToolFileChanges"], Diff(tool.Input));
+        if (tool.Program is { } parsed && (parsed.Calls.Count > 1 || !parsed.Complete))
+        {
+            var calls = tool.DisplayCalls ?? parsed.Calls.Select(call => ToolActivity.FromCall(call.Name, call.Input, state: ToolActivityState.Unknown)).ToArray();
+            foreach (var child in calls)
+            {
+                var section = new StackPanel { Spacing = 6 };
+                if (child.CategoryKey != "ToolCommand")
+                { var title = Prose(text[child.CategoryKey] + " · " + child.Summary); title.FontSize = 12; section.Children.Add(title); }
+                section.Children.Add(Render(child, text, historyChanged)); panel.Children.Add(section);
+            }
+            if (!parsed.Complete)
+            {
+                var original = new Expander { Header = text["RawData"], Content = Prose(tool.Input, true), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                AutomationProperties.SetName(original, text["RawData"]); AutomationProperties.SetHelpText(original, text["RawDataHelp"]); panel.Children.Add(original);
+            }
+        }
+        else if (tool.CategoryKey == "ToolFileChanges") Add(text["ToolFileChanges"], Diff(tool.DecodedInput));
         else if (tool.CategoryKey == "ToolDetails" && TryJson(tool.Input, out var unknown)) panel.Children.Add(Original(unknown, text));
         else if (!string.IsNullOrWhiteSpace(tool.Input) && (tool.CategoryKey == "ToolCommand" || tool.Name == "commandExecution")) Add(text["ToolCommand"], Prose(tool.DecodedInput, true), tool.DecodedInput);
         else if (tool.CategoryKey == "ToolPlan" && TryJson(tool.Input, out var plan) && plan.Field("plan").ValueKind == JsonValueKind.Array)
@@ -52,8 +68,8 @@ internal static class ActivityDetails
                 AutomationProperties.SetName(row, stateText + ": " + step.Str("step")); ToolTipService.SetToolTip(row, stateText); panel.Children.Add(row);
             }
         }
-        else if (!string.IsNullOrWhiteSpace(tool.Input)) Add(text[tool.CategoryKey is "ToolCommand" or "ToolReadFile" or "ToolListFiles" ? "ToolCommand" : tool.CategoryKey is "ToolPlan" or "ToolReview" ? tool.CategoryKey : "ToolParameters"], Value(tool.Input, text, tool.CategoryKey is "ToolCommand" or "ToolImageView"));
-        if (tool.Output is { Length: > 0 } output) Add(text["ToolOutput"], Value(output, text, tool.CategoryKey is "ToolCommand" or "ToolReadOutput"));
+        else if (!string.IsNullOrWhiteSpace(tool.Input)) Add(text[tool.CategoryKey is "ToolCommand" or "ToolReadFile" or "ToolListFiles" ? "ToolCommand" : tool.CategoryKey is "ToolPlan" or "ToolReview" ? tool.CategoryKey : "ToolParameters"], Value(tool.DisplayInput, text, tool.CategoryKey is "ToolCommand" or "ToolImageView"), tool.DisplayInput);
+        if ((tool.DisplayOutput ?? tool.Output) is { Length: > 0 } output) Add(text["ToolOutput"], Value(output, text, tool.CategoryKey is "ToolCommand" or "ToolReadOutput"), output);
         if (panel.Children.Count == 0) panel.Children.Add(Prose(text["NoDetails"]));
         return panel;
         void Add(string heading, FrameworkElement body, string? copied = null)

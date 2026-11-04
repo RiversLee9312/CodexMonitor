@@ -13,6 +13,38 @@ public sealed class ProtocolParityUiTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
+    [DataRow("Light", "zh-CN", false)]
+    [DataRow("Dark", "ar-SA", false)]
+    [DataRow("Light", "zh-CN", true)]
+    [DataRow("Dark", "ar-SA", true)]
+    public async Task ProgramExpressionsRenderCommandsAndBatchesWithoutSourceWrappers(string theme, string language, bool batch)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
+        var code = batch ? "await Promise.all(['first','second'].map(async cmd=>text((await tools.exec_command({cmd})).output)));" : "const {exec_command:run}=tools; const cmd=`Write-Output 'Readable'`; text(JSON.stringify(await run({cmd})));";
+        var entry = new TranscriptEntry("program", EntryKind.Tool, code, DateTimeOffset.Now, Tool: ToolActivity.FromCall("exec", code, "Readable output", ToolActivityState.Completed));
+        await window.ShowProtocolEntryReviewAsync(entry);
+        var content = string.Join("\n", window.ReviewVisualElements<TextBlock>().Select(t => t.Text));
+        StringAssert.Contains(content, batch ? "first" : "Write-Output 'Readable'"); if (batch) StringAssert.Contains(content, "second");
+        StringAssert.Contains(content, "Readable output");
+        Assert.IsFalse(content.Contains("tools.exec_command", StringComparison.Ordinal)); Assert.IsFalse(content.Contains("JSON.stringify", StringComparison.Ordinal));
+        Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])));
+        foreach (var (_, bounds) in window.ReviewBounds()) Assert.IsTrue(bounds.Right <= window.ReviewRoot.ActualWidth + 1);
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"program-expression-{theme}-{language}-{batch}"));
+    }
+
+    [UITestMethod]
+    [DataRow("Light", "zh-CN")]
+    [DataRow("Dark", "ar-SA")]
+    public async Task ProgramSleepUsesTheClockInsteadOfTheGenericCommandIcon(string theme, string language)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
+        const string code = "const {sleep}=tools.clock; text(await sleep({duration_ms:30000}));";
+        await window.ShowProtocolEntryReviewAsync(new("program-sleep", EntryKind.Tool, code, DateTimeOffset.Now, Tool: ToolActivity.FromCall("exec", code, "Sleep completed.", ToolActivityState.Completed)));
+        Assert.IsTrue(window.ReviewVisualElements<FontIcon>().Any(icon => icon.Glyph == "\uE917"));
+        Assert.IsFalse(window.ReviewVisualElements<TextBlock>().Any(t => t.Text.Contains("tools.clock", StringComparison.Ordinal)));
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"program-sleep-{theme}-{language}"));
+    }
+    [UITestMethod]
     [DataRow("Light", "zh-CN")]
     [DataRow("Dark", "de-DE")]
     public async Task ThemeChangesKeepReadingRowsAndTheVisibleAnchor(string theme, string language)
@@ -35,11 +67,12 @@ public sealed class ProtocolParityUiTests
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
         using var document = JsonDocument.Parse("""{"id":"command","type":"CommandExecution","command":["pwsh.exe","-Command","Write-Output \"Hello world\""],"aggregated_output":"Hello world","status":"Completed","duration":{"secs":1,"nanos":200000000}}""");
         var entry = CodexClient.ParseItem(document.RootElement);
-        if (wrapped) entry = entry with { Tool = ToolActivity.FromCall("exec", """text(await tools.exec_command({cmd:"Write-Output \"Hello world\""}));""", "Hello world", ToolActivityState.Completed) };
+        if (wrapped) entry = entry with { Tool = ToolActivity.FromCall("exec", """text(await tools.exec_command({cmd:"Write-Output \"Hello world\""}));""", "ORCHESTRATION ENVELOPE", ToolActivityState.Completed) with { DisplayOutput = "Hello world" } };
         await window.ShowProtocolEntryReviewAsync(entry);
         Assert.IsTrue(window.ReviewVisualElements<TextBlock>().Any(block => block.Text.Contains("Write-Output", StringComparison.Ordinal)));
         Assert.IsTrue(window.ReviewVisualElements<TextBlock>().Any(block => block.Text == "Hello world"));
         Assert.IsFalse(window.ReviewVisualElements<TextBlock>().Any(block => block.Text.Contains("tools.exec_command", StringComparison.Ordinal)), "Adapted command details should show the command rather than its orchestration wrapper");
+        Assert.IsFalse(window.ReviewVisualElements<TextBlock>().Any(block => block.Text.Contains("ORCHESTRATION ENVELOPE", StringComparison.Ordinal)), "The readable native output should be displayed while the original envelope remains in the transcript");
         Assert.IsFalse(window.ReviewVisualElements<Expander>().Any(e => Equals(e.Header, new LocalizationService(language)["RawData"])));
         TestContext.AddResultFile(await window.CaptureReviewAsync($"native-command-array-{theme}-{language}-{wrapped}"));
     }

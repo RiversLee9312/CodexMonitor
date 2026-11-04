@@ -36,3 +36,11 @@
 0.1.7 补充内部命令 argv 数组与脚本工具包装的逐条镜像匹配；修复空命令摘要及重复文件修改行，保留原始工具输出、完成耗时和失败状态。强标识匹配过的记录不再次消耗其它真实相同调用；旧版命令 begin/end 按 call_id 合并。
 
 0.1.8：thread/resume 使用官方 excludeTurns:true，随后分页读取历史；不再传入仅适用于thread/read的includeTurns字段。批量合入服务器会话时保留侧栏可见行，并取消已被后续用户输入替代的位置恢复。
+
+命令展开内容使用实际执行脚本；镜像匹配到原生输出时优先呈现该输出，编排包装及原始返回仍保留在记录和导出中。
+
+## JavaScript 工具编排
+
+按 [OpenAI Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling) 的 `tools.*`、顶层 `await` 和 `text(...)` 输出模型解析已保存的编排输入。使用 Acornima ECMAScript AST，不执行记录中的 JavaScript。支持括号、注释、单双引号、模板/插值、静态字符串拼接、对象与数组、已知值展开、变量/工具别名与解构、常量分支、async 函数与 IIFE、结果成员访问、JSON 包装、then、Promise.all/allSettled、已知数组 map/forEach 和 for-of。
+
+单次调用复用命令、补丁、等待、MCP 等原有语义；批次在一个折叠活动内逐项显示参数，原生镜像逐条补充结果与状态。实际执行的相同调用仍逐条保留。原始输入和聚合输出保留用于导出。运行时参数、未知条件/函数、无法确定的变更、超出深度/步骤/大小限制或未完成的代码保留折叠源码，不推测执行结果；这不是通用 JavaScript 解释器，也不保证还原任意程序。当前 CLI 的18种 ResponseItem 清单与网页 Responses API 的实验性 program/program_output 契约分别管理。
