@@ -9,7 +9,7 @@ public sealed class LocalTranscriptPager
     public const int PageRecords = 300;
     public async Task<LocalTranscriptPage> ReadAsync(SessionInfo session, long? loadedStart = null, bool older = false, CancellationToken ct = default)
     {
-        await using var stream = new FileStream(session.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.RandomAccess);
+        await using var stream = await RolloutFiles.OpenSeekableAsync(session.FilePath, ct);
         var end = stream.Length;
         var start = loadedStart is { } known && known <= end ? known : end;
         if (loadedStart is null || loadedStart > end || older) start = await FindStartAsync(stream, start, ct);

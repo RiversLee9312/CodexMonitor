@@ -5,5 +5,8 @@
   <ItemGroup><EmbeddedResource Include="..\..\LICENSE" LogicalName="CodexMonitor.Core.AppLicense" /></ItemGroup>
   <ItemGroup>
     <PackageReference Include="Acornima" Version="1.9.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.14" />
+    <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.1.11" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 </Project>

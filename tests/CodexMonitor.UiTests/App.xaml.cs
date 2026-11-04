@@ -21,11 +21,13 @@ public partial class TestApp : Application
         ReviewWindow = new CodexMonitor.App.MainWindow(reviewMode: true);
         ReviewWindow.Title = "Codex Monitor · MSTest";
         ReviewWindow.Activate();
-        if (Environment.GetCommandLineArgs().Contains("--manual-review"))
+        if (Environment.GetCommandLineArgs().Any(a => a is "--manual-review" or "--manual-review-sessions"))
         {
             ReviewWindow.Title = "Codex Monitor · Review";
             await CodexMonitor.App.MainWindow.SettleAsync();
             await ReviewWindow.SetReviewAsync(1180, 800, "Light", "zh-CN"); await ReviewWindow.ShowActivityReviewAsync(true);
+            if (Environment.GetCommandLineArgs().Contains("--manual-review-sessions"))
+                await ReviewWindow.ReviewSessionCatalogAsync(Enumerable.Range(0, 600).Select(i => new CodexMonitor.Core.SessionInfo { Id = "local-fixture-" + i, Title = "Conversation " + i, CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i) }).ToArray());
             var statePath = Environment.GetEnvironmentVariable("CODEX_MONITOR_MANUAL_STATE");
             if (!string.IsNullOrEmpty(statePath))
             {

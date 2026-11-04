@@ -19,7 +19,7 @@ public sealed partial class MainWindow
 
     internal async Task SetReviewAsync(int width, int height, string theme, string language, bool openPane = false)
     {
-        _sessionDateFlyout?.Hide(); InvalidateTranscriptRead(); SetLatestVisible(false);
+        _sessionDateFlyout?.Hide(); InvalidateTranscriptRead(); SetLatestVisible(false); _restoringSessionAnchor = 0;
         _sessionQueryCancellation?.Cancel(); _sessionQueryCancellation = null; _sessionEventClient = null; _sessionCatalogBaseline = true; _localSessionSnapshot = Array.Empty<SessionInfo>(); _sessionPageIntent = _sessionConsumedPageIntent = 0; ++_sessionQueryGeneration; _sessionCatalog = null; _sessionCatalogClient = null; _sessionLimit = SessionCatalog.PageSize; _sessionHasMore = _sessionQueryLoading = _resetSessionViewport = false; _sessionReorderTimer?.Stop(); _sessionMetadataIndex = new Dictionary<string, SessionInfo>(); _knownLocalSessionIds = null; _sessionEventMetadata.Clear(); _unreadSessionIds.Clear(); _sessionDateField = SessionDateField.Updated; _sessionDateFrom = _sessionDateThrough = null;
         _syncing = true; SessionSearch.Text = ""; _syncing = false;
         _serverEvents.Clear(); _historySessionId = null; _historyClient = null; _historyStart = null; _historyCursor = null; _hasEarlier = _loadingEarlier = _pagedReview = false; _activityGroupIdentities.Clear();
@@ -333,6 +333,7 @@ public sealed partial class MainWindow
     internal System.Collections.ObjectModel.ObservableCollection<SessionRow> ReviewSessionRows => _visibleSessionRows;
     internal bool ReviewSessionsLoading => _sessionQueryCancellation is not null;
     internal int ReviewSessionRowModels => _sessionRows.Count;
+    internal string ReviewPagingState => $"Rows={_visibleSessionRows.Count}, offset={_sessionScroll?.VerticalOffset}, extent={_sessionScroll?.ExtentHeight}, pending={_pendingSessionAnchor?.Session.Id}, restoring={_restoringSessionAnchor}, input={_sessionAnchorInputVersion}, intents={_sessionPageIntent}/{_sessionConsumedPageIntent}, limit={_sessionLimit}, visible={(SessionList.ItemsPanelRoot as ItemsStackPanel)?.FirstVisibleIndex}";
     internal async Task ReviewSessionCatalogAsync(IReadOnlyList<SessionInfo> local, Func<bool, string?, CancellationToken, Task<SessionPage>>? remote = null)
     {
         _sessionQueryCancellation?.Cancel(); _sessionQueryCancellation = null; _sessionEventClient = null; _sessionCatalogBaseline = true; _localSessionSnapshot = Array.Empty<SessionInfo>(); _sessionPageIntent = _sessionConsumedPageIntent = 0; ++_sessionQueryGeneration; _sessionCatalogClient = _client;
@@ -348,6 +349,14 @@ public sealed partial class MainWindow
     {
         TrackSessionListScroll(); ++_sessionPageIntent; ++_sessionAnchorInputVersion; _pendingSessionAnchor = null;
         _sessionScroll!.ChangeView(null, _sessionScroll.ScrollableHeight, null, true); RequestMoreSessions(); await Task.Delay(25);
+    }
+    internal async Task ReviewNativeSessionScrollAsync()
+    {
+        TrackSessionListScroll();
+        var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(SessionList);
+        var scroll = (Microsoft.UI.Xaml.Automation.Provider.IScrollProvider)peer!.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Scroll);
+        scroll.SetScrollPercent(-1, 100);
+        await SettleAsync(); await ReviewWaitSessionQueryAsync();
     }
     internal async Task ReviewWaitSessionQueryAsync()
     {

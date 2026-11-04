@@ -23,6 +23,8 @@ public sealed partial class MainWindow
     private ScrollViewer? _sessionScroll;
     private long _sessionPageIntent, _sessionConsumedPageIntent;
     private double _sessionPreviousOffset;
+    private bool _sessionPageCheckQueued;
+    private long _restoringSessionAnchor;
     private SessionDateField _sessionDateField;
     private DateOnly? _sessionDateFrom, _sessionDateThrough;
     private Flyout? _sessionDateFlyout;
@@ -74,7 +76,7 @@ public sealed partial class MainWindow
         catch (OperationCanceledException) { return false; }
         catch (Exception e) when (e is IOException or RpcException or UnauthorizedAccessException)
         { if (generation == _sessionQueryGeneration && !cancel.IsCancellationRequested) NoticeText("ReadFailed", InfoBarSeverity.Warning); return false; }
-        finally { if (ReferenceEquals(_sessionQueryCancellation, cancel)) { SetSessionLoading(false); _sessionQueryCancellation = null; } }
+        finally { if (ReferenceEquals(_sessionQueryCancellation, cancel)) { SetSessionLoading(false); _sessionQueryCancellation = null; QueueSessionPageCheck(); } }
     }
     private void ScheduleSessionQuery(bool reset = false, bool debounce = false)
     {
@@ -87,16 +89,27 @@ public sealed partial class MainWindow
     {
         var scroll = ScrollAnchor.FindScroll(SessionList); if (ReferenceEquals(scroll, _sessionScroll)) return;
         if (_sessionScroll is not null) _sessionScroll.ViewChanged -= OnSessionListViewChanged;
-        _sessionScroll = scroll; if (scroll is not null) scroll.ViewChanged += OnSessionListViewChanged;
+        _sessionScroll = scroll; if (scroll is not null) { _sessionPreviousOffset = scroll.VerticalOffset; scroll.ViewChanged += OnSessionListViewChanged; }
     }
     private void OnSessionListViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        if (e.IsIntermediate) { ++_sessionAnchorInputVersion; _pendingSessionAnchor = null; if (_sessionScroll!.VerticalOffset > _sessionPreviousOffset) ++_sessionPageIntent; }
-        _sessionPreviousOffset = _sessionScroll!.VerticalOffset; RequestMoreSessions();
+        var scroll = _sessionScroll!;
+        var forward = scroll.VerticalOffset > _sessionPreviousOffset + .5;
+        var navigation = _restoringSessionAnchor == 0 && _pendingSessionAnchor is null && e.IsIntermediate;
+        if (navigation) { ++_sessionAnchorInputVersion; _pendingSessionAnchor = null; if (forward) ++_sessionPageIntent; }
+        _sessionPreviousOffset = scroll.VerticalOffset; RequestMoreSessions();
     }
+    private void QueueSessionPageCheck()
+    {
+        if (_closing || _sessionPageCheckQueued) return;
+        _sessionPageCheckQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { _sessionPageCheckQueued = false; if (!_closing) { SessionList.UpdateLayout(); RequestMoreSessions(); } });
+    }
+    private void OnSessionNavigationInput()
+    { ++_sessionAnchorInputVersion; _restoringSessionAnchor = 0; _pendingSessionAnchor = null; }
     private void RequestMoreSessions()
     {
-        if (_closing || _sessionQueryLoading || _sessionQueryCancellation is not null || !_sessionHasMore || _sessionCatalog is null || _sessionScroll is null ||
+        if (_closing || _restoringSessionAnchor != 0 || _sessionQueryLoading || _sessionQueryCancellation is not null || !_sessionHasMore || _sessionCatalog is null || _sessionScroll is null ||
             _sessionScroll.ScrollableHeight - _sessionScroll.VerticalOffset > Math.Max(200, _sessionScroll.ViewportHeight) ||
             _sessionPageIntent <= _sessionConsumedPageIntent && _sessionScroll.ScrollableHeight > 1) return;
         _sessionConsumedPageIntent = _sessionPageIntent;

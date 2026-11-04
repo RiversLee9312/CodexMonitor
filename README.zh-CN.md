@@ -35,6 +35,9 @@ App-server 0.164.0 没有提供 Responses API 的参数生成增量，`item/star
 
 搜索与 Markdown 导出覆盖当前已加载范围，向上滚动可继续载入历史。更多细节见 [分页与性能](docs/performance.md)、[协议覆盖](docs/protocol-coverage.md) 和 [无障碍验证边界](docs/accessibility.md)。
 
+
+本地历史同时支持 `.jsonl` 与 `.jsonl.zst`，直接读取压缩会话，不改写 Codex 原记录。
+
 ## 构建与测试
 
 源码构建需要 .NET 10 SDK；NativeAOT 还需要 Visual Studio 的“使用 C++ 的桌面开发”工具与 Windows SDK。

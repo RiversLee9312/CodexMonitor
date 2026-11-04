@@ -10,8 +10,7 @@ public sealed class TranscriptParser
     public Task<TranscriptSnapshot> ReadAsync(SessionInfo session, CancellationToken ct = default) => ReadRangeAsync(session, 0, null, ct);
     public async Task<TranscriptSnapshot> ReadRangeAsync(SessionInfo session, long startOffset, long? endOffset = null, CancellationToken ct = default)
     {
-        await using var stream = new FileStream(session.FilePath, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var stream = await RolloutFiles.OpenSeekableAsync(session.FilePath, ct);
         stream.Position = startOffset;
         var reader = new Utf8RecordReader(stream, startOffset, endOffset ?? stream.Length);
         var entries = new List<TranscriptEntry>();

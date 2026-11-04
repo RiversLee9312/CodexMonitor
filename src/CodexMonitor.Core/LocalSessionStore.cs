@@ -34,6 +34,8 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
         }
         var changed = 0;
+        var database = LocalSessionDatabase.Read(Home, ct);
+        var previous = _cache.Values.Select(v => v.Info).DistinctBy(s => s.Id).ToDictionary(s => s.Id, StringComparer.Ordinal);
         var titles = new Dictionary<string, string>();
         var indexPath = Path.Combine(Home, "session_index.jsonl");
         if (File.Exists(indexPath))
@@ -48,7 +50,7 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
         }
         var result = new ConcurrentBag<SessionInfo>();
         var files = new[] { "sessions", "archived_sessions" }.SelectMany(dir =>
-            Directory.Exists(Path.Combine(Home, dir)) ? Directory.EnumerateFiles(Path.Combine(Home, dir), "*.jsonl", SearchOption.AllDirectories) : []).ToArray();
+            Directory.Exists(Path.Combine(Home, dir)) ? RolloutFiles.Enumerate(Path.Combine(Home, dir)) : []).ToArray();
         var paths = files.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var old in _cache.Keys) if (!paths.Contains(old)) { _cache.TryRemove(old, out _); changed = 1; }
         await Parallel.ForEachAsync(files, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct }, async (path, token) =>
@@ -61,9 +63,34 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
                 else
                 {
                     var match = IdPattern().Match(file.Name);
-                    info = new SessionInfo { Id = match.Success ? match.Value : Path.GetFileNameWithoutExtension(path), FilePath = path,
+                    info = new SessionInfo { Id = match.Success ? match.Value : Path.GetFileNameWithoutExtension(RolloutFiles.PlainPath(path)), FilePath = path,
                         UpdatedAt = file.LastWriteTimeUtc, CreatedAt = file.CreationTimeUtc, FileVersion = new(file.Length, file.LastWriteTimeUtc),
                         IsArchived = Path.GetRelativePath(Home, path).StartsWith("archived_sessions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) };
+                    if (RolloutFiles.IsCompressed(path))
+                    {
+                        // Listing cold history must not decode hundreds of complete rollouts.
+                        // Codex's local state DB supplies metadata; without it, read a bounded prefix.
+                        var seed = previous.GetValueOrDefault(info.Id) ?? database.GetValueOrDefault(info.Id);
+                        if (seed is not null) info = seed with { FilePath = path, FileVersion = info.FileVersion, IsLive = false, ActiveTurnId = null, UpdatedAt = previous.ContainsKey(info.Id) ? seed.UpdatedAt : file.LastWriteTimeUtc };
+                        else
+                        {
+                            var bytes = await RolloutFiles.ReadPrefixAsync(path, 256 * 1024, token);
+                            foreach (var line in System.Text.Encoding.UTF8.GetString(bytes).Split('\n'))
+                            {
+                                try
+                                {
+                                    using var d = JsonDocument.Parse(line); var r = d.RootElement; var p = r.Field("payload");
+                                    if (r.Str("type") == "session_meta") info = TranscriptParser.Metadata(info, p);
+                                    if (info.Title.Length == 0 && r.Str("type") == "response_item" && p.Str("role") == "user")
+                                    { var message = string.Join(" ", p.Field("content").Items().Select(x => x.Str("text"))).Trim(); info = info with { Title = message[..Math.Min(180, message.Length)].Replace('\n', ' ').Replace('\r', ' ') }; }
+                                }
+                                catch (JsonException) { }
+                            }
+                        }
+                        info = info with { IsArchived = Path.GetRelativePath(Home, path).StartsWith("archived_sessions" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), ContentRevision = seed?.ContentRevision ?? "zstd:" + file.LastWriteTimeUtc.Ticks };
+                    }
+                    else
+                    {
                     await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
                     // Metadata and recent lifecycle markers never require scanning a multi-gigabyte rollout.
                     const int headBytes = 64 * 1024, tailBytes = 256 * 1024;
@@ -123,9 +150,11 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
                         var signature = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(last.Text)));
                         info = info with { UpdatedAt = contentTime != default ? contentTime : info.UpdatedAt, ContentRevision = last.Offset + ":" + signature };
                     }
+                    }
                     _cache[path] = (file.Length, file.LastWriteTimeUtc, info);
                     Interlocked.Exchange(ref changed, 1);
                 }
+                if (database.TryGetValue(info.Id, out var indexed)) info = info with { Title = indexed.Title.Length > 0 ? indexed.Title : info.Title, Cwd = info.Cwd.Length > 0 ? info.Cwd : indexed.Cwd, Model = info.Model.Length > 0 ? info.Model : indexed.Model, Source = info.Source.Length > 0 ? info.Source : indexed.Source, IsArchived = info.IsArchived || indexed.IsArchived, ParentId = info.ParentId ?? indexed.ParentId };
                 if (titles.TryGetValue(info.Id, out var title) && !string.IsNullOrWhiteSpace(title)) info = info with { Title = title };
                 result.Add(info);
             }
@@ -143,7 +172,7 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-        return result.OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id, StringComparer.Ordinal).ToArray();
+        return result.OrderBy(x => x.IsArchived).ThenBy(x => RolloutFiles.IsCompressed(x.FilePath)).ThenByDescending(x => x.UpdatedAt).DistinctBy(x => x.Id).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id, StringComparer.Ordinal).ToArray();
         }
         finally { _scan.Release(); }
     }

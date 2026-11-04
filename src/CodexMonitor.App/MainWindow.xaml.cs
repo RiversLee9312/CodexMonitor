@@ -89,9 +89,10 @@ public sealed partial class MainWindow : Window
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
         _text = new(_settings.Language); _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json"));
         InitializeComponent();
-        SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) => { _sessionAnchorInputVersion++; if (e.GetCurrentPoint(SessionList).Properties.MouseWheelDelta < 0) ++_sessionPageIntent; }), true);
-        SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => _sessionAnchorInputVersion++), true);
-        SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { _sessionAnchorInputVersion++; if (e.Key is VirtualKey.PageDown or VirtualKey.End or VirtualKey.Down) ++_sessionPageIntent; }), true);
+        SessionList.NavigationRequested += forward => { OnSessionNavigationInput(); if (forward) { ++_sessionPageIntent; QueueSessionPageCheck(); } };
+        SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) => { OnSessionNavigationInput(); if (e.GetCurrentPoint(SessionList).Properties.MouseWheelDelta < 0) { ++_sessionPageIntent; QueueSessionPageCheck(); } }), true);
+        SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => OnSessionNavigationInput()), true);
+        SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { OnSessionNavigationInput(); if (e.Key is VirtualKey.PageDown or VirtualKey.End or VirtualKey.Down) { ++_sessionPageIntent; QueueSessionPageCheck(); } }), true);
         _themeSettings = Microsoft.UI.System.ThemeSettings.CreateForWindowId(AppWindow.Id);
         _themeSettings.Changed += OnSystemThemeChanged;
         Root.GotFocus += (_, _) => AccessibilitySupport.NormalizeIconsAfterLayout(Root);
@@ -288,7 +289,7 @@ public sealed partial class MainWindow : Window
                 {
                     _selected = updated with { ActiveTurnId = updated.ActiveTurnId ?? (_attached.Contains(updated.Id) && updated.State is SessionState.Active or SessionState.Waiting ? selected.ActiveTurnId : null) };
                     UpdateTitle(); UpdateChrome();
-                    var length = File.Exists(updated.FilePath) ? new FileInfo(updated.FilePath).Length : -1;
+                    var length = RolloutFiles.Find(updated.FilePath)?.Length ?? -1;
                     if (_client is { IsConnected: true } && _attached.Contains(updated.Id))
                     { if (force) await LoadTranscriptAsync(_selected, false); }
                     else if (!string.IsNullOrEmpty(updated.FilePath) && (length != _selectedLength || force)) await LoadTranscriptAsync(_selected, false);
@@ -346,9 +347,12 @@ public sealed partial class MainWindow : Window
         if (anchor is not null && (structureChanged || ReferenceEquals(anchor, _pendingSessionAnchor)) && _visibleSessionRows.Contains(anchor))
         {
             var captured = anchor;
+            _restoringSessionAnchor = anchorGeneration;
             _pendingSessionAnchor = anchor; _pendingSessionAnchorY = anchorY; _pendingSessionAnchorInput = inputVersion;
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, async () =>
             {
+                try
+                {
                 if (_closing || anchorGeneration != _sessionAnchorGeneration || inputVersion != _sessionAnchorInputVersion) return;
                 SessionList.ScrollIntoView(captured, ScrollIntoViewAlignment.Leading);
                 for (int attempt = 0; attempt < 16; attempt++)
@@ -368,9 +372,15 @@ public sealed partial class MainWindow : Window
                     }
                     await Task.Delay(16);
                 }
+                }
+                finally
+                {
+                    if (_restoringSessionAnchor == anchorGeneration)
+                    { _sessionPreviousOffset = _sessionScroll?.VerticalOffset ?? _sessionPreviousOffset; _restoringSessionAnchor = 0; }
+                }
             });
         }
-        else _pendingSessionAnchor = null;
+        else { _pendingSessionAnchor = null; _restoringSessionAnchor = 0; }
         NoSessionsPanel.Visibility = visible.Length == 0 && !_sessionQueryLoading ? Visibility.Visible : Visibility.Collapsed;
         if (announceNew) AccessibilitySupport.Announce(SessionCount, _text.Format("NewSessionsAvailable", _text.Number(added.Length)), "new-sessions");
     }
@@ -406,7 +416,7 @@ public sealed partial class MainWindow : Window
         try
         {
             TranscriptSnapshot snapshot;
-            var sourceClient = _client is { IsConnected: true } connected && (_attached.Contains(session.Id) || !File.Exists(session.FilePath)) ? connected : null;
+            var sourceClient = _client is { IsConnected: true } connected && (_attached.Contains(session.Id) || !RolloutFiles.Exists(session.FilePath)) ? connected : null;
             ServerRead? reading = null; ServerTranscript? serverSnapshot = null;
             if (sourceClient is not null)
             {
@@ -417,9 +427,9 @@ public sealed partial class MainWindow : Window
                 if (!ReferenceEquals(sourceClient, _client) || !sourceClient.IsConnected || generation != _transcriptReadGeneration || _selected?.Id != session.Id) return;
                 if (!sameSource) { ResetHistory(session.Id, sourceClient); _historyCursor = serverSnapshot.NextCursor; _hasEarlier = _historyCursor is not null; }
             }
-            else if (File.Exists(session.FilePath))
+            else if (RolloutFiles.Exists(session.FilePath))
             {
-                var initialLength = new FileInfo(session.FilePath).Length;
+                var initialLength = RolloutFiles.Find(session.FilePath)?.Length ?? -1;
                 LocalTranscriptPage? localPage = null;
                 if (!_reviewMode || _pagedReview)
                 {
@@ -598,7 +608,7 @@ public sealed partial class MainWindow : Window
             }
             _connectionEndpoint = _settings.UseSharedServer ? _settings.Endpoint : null;
             Notice.IsOpen = false; await RefreshAsync(true);
-            if (wasConnected && _selected is { } localSession && File.Exists(localSession.FilePath)) await LoadTranscriptAsync(localSession, false);
+            if (wasConnected && _selected is { } localSession && RolloutFiles.Exists(localSession.FilePath)) await LoadTranscriptAsync(localSession, false);
         }
         catch (FileNotFoundException) when (!_settings.UseSharedServer)
         { await ShowCliSetupAsync(); }
@@ -672,7 +682,7 @@ public sealed partial class MainWindow : Window
             if (!_closing && ReferenceEquals(_client, client))
             {
                 _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
-                if (_selected is { } session && File.Exists(session.FilePath)) await LoadTranscriptAsync(session, false);
+                if (_selected is { } session && RolloutFiles.Exists(session.FilePath)) await LoadTranscriptAsync(session, false);
             }
         });
     }

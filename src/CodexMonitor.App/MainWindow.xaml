@@ -26,7 +26,7 @@
             <Button x:Name="RefreshButton" Grid.Column="2" Style="{StaticResource IconButtonStyle}" Click="OnRefresh"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE72C;" FontSize="16"/></Button>
           </Grid>
           <Grid Grid.Row="3">
-            <ListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
+            <local:SessionListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
               <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
               <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></ListView.ItemContainerStyle>
               <ListView.ItemTemplate>
@@ -51,7 +51,7 @@
                   </Grid>
                 </DataTemplate>
               </ListView.ItemTemplate>
-            </ListView>
+            </local:SessionListView>
             <ProgressRing x:Name="SessionLoadingRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" IsHitTestVisible="False"/>
             <StackPanel x:Name="NoSessionsPanel" Visibility="Collapsed" VerticalAlignment="Center" Spacing="8" Margin="8">
               <TextBlock x:Name="NoSessionsTitle" TextWrapping="Wrap" FontWeight="SemiBold"/>

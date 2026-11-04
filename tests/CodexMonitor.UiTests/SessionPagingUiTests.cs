@@ -34,16 +34,29 @@ public sealed class SessionPagingUiTests
         TestContext.AddResultFile(await window.CaptureReviewAsync("session-paging-10000-dark"));
     }
     [UITestMethod]
+    public async Task NativeScrollingLoadsLocalPagesWithoutCallingThePagingEntryPoint()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Light", "zh-CN");
+        await window.ReviewSessionCatalogAsync(Sessions(600)); Assert.HasCount(50, window.ReviewSessionRows);
+        await window.ReviewNativeSessionScrollAsync(); Assert.IsGreaterThan(50, window.ReviewSessionRows.Count);
+        await window.ReviewNativeSessionScrollAsync(); Assert.IsGreaterThan(100, window.ReviewSessionRows.Count);
+        Assert.IsLessThan(600, window.ReviewSessionRows.Count); Assert.IsFalse(window.ReviewSessionRows.Any(r => r.HasUnread));
+        TestContext.AddResultFile(await window.CaptureReviewAsync("local-native-scroll-pages"));
+    }
+    [UITestMethod]
     public async Task ImportingHistoricalServerPagesPreservesTheVisibleRowWithoutUnreadDotsOrAutomaticDrain()
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Light", "zh-CN");
         var local = Sessions(150); await window.ReviewSessionCatalogAsync(local); window.ReadReviewSession(local[0].Id);
         var before = await window.SessionAnchorReviewAsync(local[0].Id, true); var original = window.ReviewSessionRows[0];
+        TestContext.WriteLine("Before import: " + window.ReviewPagingState);
         var remote = Sessions(10000).Select((s,i) => s with { Id = "remote-" + i, UpdatedAt = DateTimeOffset.UtcNow.AddDays(1).AddMinutes(-i) }).ToArray();
         var calls = 0;
         await window.ReviewSessionCatalogAsync(local, (a, c, _) =>
         { calls++; var n = c is null ? 0 : int.Parse(c); return Task.FromResult(new SessionPage(a ? [] : remote.Skip(n).Take(50).ToArray(), a || n >= 9950 ? null : (n + 50).ToString())); });
         await Task.Delay(350);
+        TestContext.WriteLine("After import: " + window.ReviewPagingState);
+        TestContext.AddResultFile(await window.CaptureReviewAsync("server-import-anchor-before-assert"));
         Assert.AreEqual(before, await window.SessionAnchorReviewAsync(local[0].Id), 2); Assert.IsTrue(window.ReviewSessionRows.Contains(original));
         Assert.IsFalse(window.ReviewSessionRows.Any(r => r.HasUnread)); Assert.IsLessThanOrEqualTo(3, calls, "Restoring an anchor at the bottom must not trigger a pagination loop");
         Assert.IsLessThan(100, window.ReviewSessionRows.Count);

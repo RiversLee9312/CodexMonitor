@@ -33,6 +33,9 @@ Historical app-server items do not always include the model used for a reply. Mi
 
 App-server 0.164.0 does not expose the Responses API’s argument-generation delta stream. Its `item/started` event describes actual activity. The unified placeholder handles explicit generation/progress events supplied by the source; it does not invent an unobservable stage. Search and Markdown export cover the currently loaded window. Scroll upward to bring older history into that window. Unknown payloads retain folded source. Transcript JavaScript is parsed, never executed.
 
+
+Local history supports both `.jsonl` and `.jsonl.zst` without rewriting Codex files.
+
 ## Build and test
 
 On Windows, install the .NET 10 SDK, Visual Studio C++ desktop build tools and a Windows SDK for NativeAOT.
