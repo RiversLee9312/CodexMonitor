@@ -32,8 +32,8 @@ public static class SessionMetadata
     };
     public static bool ContentChanged(SessionInfo before, SessionInfo after)
     {
-        if (RolloutFiles.IsCompressed(before.FilePath) != RolloutFiles.IsCompressed(after.FilePath) &&
-            string.Equals(RolloutFiles.PlainPath(before.FilePath), RolloutFiles.PlainPath(after.FilePath), StringComparison.OrdinalIgnoreCase)) return false;
+        if (RolloutFiles.IsCompressed(before.FilePath) != RolloutFiles.IsCompressed(after.FilePath) && before.Id == after.Id)
+            return after.UpdatedAt - before.UpdatedAt > TimeSpan.FromSeconds(1);
         if (before.ContentRevision is { } a && after.ContentRevision is { } b)
             return a.StartsWith("server:", StringComparison.Ordinal) == b.StartsWith("server:", StringComparison.Ordinal) && a != b;
         // Old/custom files without semantic records: size changes are useful; mtime or source-clock changes aren't.

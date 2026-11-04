@@ -35,6 +35,7 @@ public sealed class CompressedRolloutTests
         var duplicate = Path.Combine(_home, "sessions", "copy-" + Id + ".jsonl"); await Compress(duplicate, Transcript()); File.SetLastWriteTimeUtc(duplicate + ".zst", DateTime.UtcNow.AddDays(1));
         var store = new LocalSessionStore(_home); var plain = (await store.ListAsync()).Single(); Assert.AreEqual(path, plain.FilePath);
         File.Delete(path); var compressed = (await store.ListAsync()).Single(); Assert.IsTrue(RolloutFiles.IsCompressed(compressed.FilePath)); Assert.IsFalse(SessionMetadata.ContentChanged(plain, compressed));
+        Assert.IsTrue(SessionMetadata.ContentChanged(compressed, plain with { UpdatedAt = compressed.UpdatedAt.AddMinutes(1), ContentRevision = "new-message" }));
         Assert.AreEqual(plain.UpdatedAt, compressed.UpdatedAt); Assert.HasCount(3, (await new TranscriptParser().ReadAsync(plain)).Entries);
         await File.WriteAllTextAsync(path, Transcript()); Assert.HasCount(3, (await new TranscriptParser().ReadAsync(compressed)).Entries);
     }
