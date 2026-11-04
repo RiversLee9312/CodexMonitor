@@ -96,6 +96,7 @@ public sealed partial class MainWindow : Window
         _openSessionServer = (match, ct) => SessionServerLocator.OpenAsync(match.Server, _settings.CodexHome, _settings.Executable, ct);
         _text = new(_settings.Language); _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json"));
         InitializeComponent();
+        SessionList.LayoutUpdated += (_, _) => { if (_sessionAwaitingLayout) { _sessionAwaitingLayout = false; QueueSessionPageCheck(); } };
         SessionList.NavigationRequested += forward => { OnSessionNavigationInput(); if (forward) { ++_sessionPageIntent; QueueSessionPageCheck(); } };
         SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) => { OnSessionNavigationInput(); if (e.GetCurrentPoint(SessionList).Properties.MouseWheelDelta < 0) { ++_sessionPageIntent; QueueSessionPageCheck(); } }), true);
         SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => OnSessionNavigationInput()), true);
@@ -336,7 +337,11 @@ public sealed partial class MainWindow : Window
             else _sessionRows[session.Id] = row = new(session, _text, connected, _selected?.Id != session.Id && (_unreadSessionIds.Contains(session.Id) || observeAdditions && _sessionBaselineLoaded));
             return row;
         }).ToArray();
-        var structureChanged = _visibleSessionRows.Count != visible.Length || !_visibleSessionRows.SequenceEqual(visible);
+        // Native KeepItemsInView handles tail appends. Re-anchoring those pages forces realization
+        // and fights an in-flight wheel gesture. Correct only changes before an existing row.
+        var appendOnly = visible.Length >= _visibleSessionRows.Count && _visibleSessionRows.Select((row, i) => ReferenceEquals(row, visible[i])).All(same => same);
+        var structureChanged = !appendOnly;
+        if (structureChanged || visible.Length != _visibleSessionRows.Count) _sessionAwaitingLayout = true;
         _sessionBaselineLoaded = true; _syncing = true;
         try
         {

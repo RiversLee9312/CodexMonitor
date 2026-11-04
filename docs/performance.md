@@ -18,6 +18,16 @@ Update time is derived from semantic conversation records rather than file metad
 
 A 10,000-conversation MSTest fixture verifies a 50-row start, distinct automatic pages during repeated fast scrolling, native dispatcher progress, retained anchors during server imports and no automatic history drain. Date ranges use local calendar days, including timezone boundaries, and combine with keywords. Indexing still needs a filesystem metadata inventory; a cold cache must inspect the files in the background. It does not read whole transcripts or construct all UI rows.
 
+### Rapid navigation
+
+Local metadata can use a whole prompt as its title. The sidebar and conversation heading use a cached, whitespace-normalized prefix of at most 180 UTF-16 code units plus an ellipsis, without splitting a surrogate pair. Full metadata remains searchable. Native `TextTrimming` alone is insufficient: it can still shape the entire input before clipping it. Folder binding uses a later XAML phase, leaving native scrolling placeholders enabled.
+
+Appending a page relies on `KeepItemsInView`; it does not call `ScrollIntoView` or run anchor correction. Insertions, removals and reordering before the viewport retain the existing anchor path. Scroll checks wait for native layout after a collection change rather than calling `UpdateLayout` for every wheel event. This avoids both forced remeasurement during inertia and an underfilled-viewport check against stale extents.
+
+Transcript cards retain their already-built content when they load. Shared theme-resource styles avoid repeatedly parsing the same XAML while preserving runtime theme resolution. Icon accessibility normalization coalesces duplicate requests and walks the tree in bounded, low-priority batches. Immutable tool projections cache decoded commands, categories, summaries and file-change parts; local parsing and server page reading prepare them before binding. Inline Markdown matching uses a linear-time regex engine.
+
+`RapidNavigationUiTests` covers prompt-sized titles, bidirectional native Scroll-pattern input, immediate selection, uniqueness and maximum dispatcher gaps, rather than only counting eventual ticks. That is a deterministic regression test, not a mouse-wheel simulation. The separate `--manual-review-navigation` host supplies 1,000 synthetic sessions, every third title approximately 240,000 characters long, and actual selectable transcripts. Exercise that host using injected mouse-wheel bursts in both directions and then click a visible session. Its optional `CODEX_MONITOR_MANUAL_STATE` file records dispatcher gaps and row/selection/loading state; it never reads real conversations or saves user settings. Native installed-version wheel testing supplements both fixtures. Measurements are machine-specific, and a passing sample does not guarantee every possible transcript has identical latency.
+
 ## Compressed local history
 
 Local discovery resolves both `.jsonl` and Codex's `.jsonl.zst` format. A plain sibling takes precedence, including during compression or materialization; representation changes do not create unread content. The optional local SQLite state database is opened read-only using Windows SQLite and supplies lightweight metadata for compressed files. Without it, discovery decodes only a bounded prefix. Duplicate physical representations become one conversation.

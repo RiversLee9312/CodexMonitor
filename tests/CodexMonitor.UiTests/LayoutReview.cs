@@ -360,6 +360,13 @@ public sealed partial class MainWindow
         scroll.SetScrollPercent(-1, 100);
         await SettleAsync(); await ReviewWaitSessionQueryAsync();
     }
+    internal void ReviewNativeSessionScroll(double percent)
+    {
+        var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(SessionList);
+        ((Microsoft.UI.Xaml.Automation.Provider.IScrollProvider)peer!.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Scroll)).SetScrollPercent(-1, percent);
+    }
+    internal void ReviewSelectSession(int index) => SessionList.SelectedItem = _visibleSessionRows[index];
+    internal bool ReviewTranscriptLoading => LoadingRing.IsActive;
     internal async Task ReviewWaitSessionQueryAsync()
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));

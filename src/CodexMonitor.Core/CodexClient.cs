@@ -13,7 +13,7 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     private static readonly string[] AllSources = ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"];
     public async Task InitializeAsync(CancellationToken ct = default)
     {
-        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.14" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
+        var result = await Rpc.RequestAsync("initialize", new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "codex_monitor", ["title"] = "Codex Monitor", ["version"] = "0.1.15" }, ["capabilities"] = new JsonObject { ["experimentalApi"] = true } }, ct).ConfigureAwait(false);
         UserAgent = result.Str("userAgent");
         await Rpc.NotifyAsync("initialized", new JsonObject(), ct).ConfigureAwait(false);
     }
@@ -102,16 +102,21 @@ public sealed class CodexClient(JsonRpcClient rpc) : IAsyncDisposable
     public async Task<ServerTranscript> ReadTranscriptPageAsync(string id, string? cursor = null, CancellationToken ct = default)
     {
         var response = await Rpc.RequestStampedAsync("thread/items/list", new JsonObject { ["threadId"] = id, ["cursor"] = cursor, ["limit"] = 100, ["sortDirection"] = "desc" }, ct).ConfigureAwait(false);
-        var entries = new List<TranscriptEntry>(); var watermarks = new Dictionary<string, long>();
-        foreach (var row in response.Value.Field("data").Items().Reverse())
+        return await Task.Run(() =>
         {
-            var item = row.Field("item"); var time = row.Field("startedAtMs").TryNumber(out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : default;
-            var entry = ParseItem(item, time, row.Field("completedAtMs").TryNumber(out _) ? ToolActivityState.Completed : null) with { TurnId = row.Str("turnId"), Model = item.Str("model") is { Length: > 0 } model ? model : Models.ForItem(id, item.Str("id")) };
-            entries.Add(entry); Models.Remember(id, entry.Id, entry.Model); watermarks[entry.Id] = response.Sequence;
-        }
-        var next = response.Value.Str("nextCursor");
-        if (next.Length > 0 && next == cursor) throw new IOException("Repeated pagination cursor");
-        return new(entries, watermarks, next.Length > 0 ? next : null);
+            var entries = new List<TranscriptEntry>(); var watermarks = new Dictionary<string, long>();
+            foreach (var row in response.Value.Field("data").Items().Reverse())
+            {
+                ct.ThrowIfCancellationRequested();
+                var item = row.Field("item"); var time = row.Field("startedAtMs").TryNumber(out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : default;
+                var entry = ParseItem(item, time, row.Field("completedAtMs").TryNumber(out _) ? ToolActivityState.Completed : null) with { TurnId = row.Str("turnId"), Model = item.Str("model") is { Length: > 0 } model ? model : Models.ForItem(id, item.Str("id")) };
+                entry.Tool?.PreparePresentation();
+                entries.Add(entry); Models.Remember(id, entry.Id, entry.Model); watermarks[entry.Id] = response.Sequence;
+            }
+            var next = response.Value.Str("nextCursor");
+            if (next.Length > 0 && next == cursor) throw new IOException("Repeated pagination cursor");
+            return new ServerTranscript(entries, watermarks, next.Length > 0 ? next : null);
+        }, ct).ConfigureAwait(false);
     }
     public async Task<ServerTranscript> ReadTranscriptStateAsync(string id, CancellationToken ct = default)
     {

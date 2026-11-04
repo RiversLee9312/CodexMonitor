@@ -13,6 +13,21 @@ public sealed class SessionListTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
+    public void PromptSizedTitlesAreBoundedForLayoutButRemainSearchableAndUpdateWithMetadata()
+    {
+        var text = new LocalizationService("zh-CN");
+        var full = "A\n" + new string('x', 240000) + "search-at-the-end";
+        var session = new SessionInfo { Id = "prompt-title", Title = full };
+        var row = new SessionRow(session, text);
+        Assert.IsLessThanOrEqualTo(181, row.Title.Length); Assert.IsLessThan(600, row.AccessibleName.Length);
+        Assert.AreSame(full, row.Session.Title); Assert.IsTrue(new SessionQuery("search-at-the-end").Matches(row.Session, TimeZoneInfo.Local));
+        Assert.IsFalse(row.Title.Contains('\n'));
+        row.Update(session with { Title = "Renamed" }, text, false, false);
+        Assert.AreEqual("Renamed", row.Title);
+        var unicode = new SessionRow(session with { Title = new string('x',179) + "😀end" }, text);
+        Assert.IsFalse(char.IsHighSurrogate(unicode.Title[^2]));
+    }
+    [UITestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task ImportingTwoHundredServerSessionsKeepsTheOriginalVisibleRows(bool immediateStatusUpdate)

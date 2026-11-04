@@ -21,35 +21,44 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         var program = ToolProgram.Parse(code);
         return program.Calls.Count > 0 ? program : null;
     }
-    private ToolActivity? ProgramCall => Program is { Complete: true, Calls.Count: 1 } program ? FromCall(program.Calls[0].Name, program.Calls[0].Input) : null;
+    // Records are immutable; keep derived data outside the record so a `with` copy cannot
+    // accidentally inherit projections for its previous input. Each lazy depends only on earlier fields.
+    private sealed class PresentationProjection(ToolActivity tool)
+    {
+        internal readonly Lazy<ToolActivity?> Call = new(() => tool.Program is { Complete: true, Calls.Count: 1 } p ? FromCall(p.Calls[0].Name, p.Calls[0].Input) : null);
+        internal readonly Lazy<long?> Wait = new(tool.ReadWaitDuration);
+        internal readonly Lazy<string> Decoded = new(tool.ReadDecodedInput);
+        internal readonly Lazy<string> Category = new(tool.ReadCategory);
+        internal readonly Lazy<string> Summary = new(tool.ReadSummary);
+    }
+    private static readonly ConditionalWeakTable<ToolActivity, PresentationProjection> Presentations = new();
+    private PresentationProjection Presentation => Presentations.GetValue(this, static tool => new(tool));
+    private ToolActivity? ProgramCall => Presentation.Call.Value;
     public string DisplayInput => ProgramCall?.Input ?? Input;
-    public long? WaitDurationMs
+    public long? WaitDurationMs => Presentation.Wait.Value;
+    private long? ReadWaitDuration()
     {
-        get
+        if (ProgramCall is { } call) return call.WaitDurationMs;
+        if (!Regex.IsMatch(Name, @"(?:^|[._:/])(?:sleep|wait)$", RegexOptions.IgnoreCase)) return null;
+        try
         {
-            if (ProgramCall is { } call) return call.WaitDurationMs;
-            if (!Regex.IsMatch(Name, @"(?:^|[._:/])(?:sleep|wait)$", RegexOptions.IgnoreCase)) return null;
-            try
-            {
-                using var document = JsonDocument.Parse(Input); var root = document.RootElement;
-                var value = root.Field("duration_ms"); if (value.ValueKind == JsonValueKind.Undefined) value = root.Field("durationMs");
-                return value.TryNumber(out var duration) && duration >= 0 ? duration : null;
-            }
-            catch (JsonException) { return null; }
+            using var document = JsonDocument.Parse(Input); var root = document.RootElement;
+            var value = root.Field("duration_ms"); if (value.ValueKind == JsonValueKind.Undefined) value = root.Field("durationMs");
+            return value.TryNumber(out var duration) && duration >= 0 ? duration : null;
         }
+        catch (JsonException) { return null; }
     }
-    public string DecodedInput
+    public string DecodedInput => Presentation.Decoded.Value;
+    private string ReadDecodedInput()
     {
-        get
-        {
-            if (ProgramCall is { } call) return call.DecodedInput;
-            var value = Input;
-            try { using var document = JsonDocument.Parse(value); var root = document.RootElement; value = root.Str("cmd", root.Str("command", root.Str("code", root.Str("input", root.Str("query", root.Str("path", value)))))); }
-            catch (JsonException) { }
-            return value;
-        }
+        if (ProgramCall is { } call) return call.DecodedInput;
+        var value = Input;
+        try { using var document = JsonDocument.Parse(value); var root = document.RootElement; value = root.Str("cmd", root.Str("command", root.Str("code", root.Str("input", root.Str("query", root.Str("path", value)))))); }
+        catch (JsonException) { }
+        return value;
     }
-    public string CategoryKey => WaitDurationMs is not null ? "ToolWaiting" : CategoryOverride ?? InferCategory();
+    public string CategoryKey => Presentation.Category.Value;
+    private string ReadCategory() => WaitDurationMs is not null ? "ToolWaiting" : CategoryOverride ?? InferCategory();
     private string InferCategory()
     {
         if (ProgramCall is { } call) return call.CategoryKey;
@@ -71,28 +80,41 @@ public sealed record ToolActivity(string Name, string Input, string? Output = nu
         if (name is "exec" or "shell" or "commandExecution" or "exec_command" || Input.Contains("exec_command", StringComparison.Ordinal)) return "ToolCommand";
         return "ToolDetails";
     }
-    public string Summary
+    public string Summary => Presentation.Summary.Value;
+    private string ReadSummary()
     {
-        get
-        {
-            if (ProgramCall is { } call) return call.Summary;
-            if (Program is { } program) return program.Complete ? Compact(string.Join(" · ", program.Calls.Select(c => FromCall(c.Name, c.Input).Summary))) : "";
-            if (SummaryOverride is not null) return Compact(SummaryOverride);
-            if (WaitDurationMs is not null) return "";
-            var value = DecodedInput;
-            var file = Regex.Match(value, @"\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)");
-            if (file.Success) return Path.GetFileName(file.Groups[1].Value.Trim().Replace('/', Path.DirectorySeparatorChar));
-            if (CategoryKey == "ToolReadOutput") return "";
-            return Compact(value);
-        }
+        if (ProgramCall is { } call) return call.Summary;
+        if (Program is { } program) return program.Complete ? Compact(string.Join(" · ", program.Calls.Select(c => FromCall(c.Name, c.Input).Summary))) : "";
+        if (SummaryOverride is not null) return Compact(SummaryOverride);
+        if (WaitDurationMs is not null) return "";
+        var value = DecodedInput;
+        var file = Regex.Match(value, @"\*\*\* (?:Update|Add|Delete) File:\s*([^\r\n]+)");
+        if (file.Success) return Path.GetFileName(file.Groups[1].Value.Trim().Replace('/', Path.DirectorySeparatorChar));
+        if (CategoryKey == "ToolReadOutput") return "";
+        return Compact(value);
     }
     private static string Compact(string value)
     {
-        value = Regex.Replace(value, @"\s+", " ").Trim();
-        return value.Length > 180 ? value[..180] + "…" : value;
+        var buffer = new System.Text.StringBuilder(181); var position = 0;
+        for (; position < value.Length && buffer.Length < 180; position++)
+        {
+            var c = value[position];
+            if (!char.IsWhiteSpace(c)) buffer.Append(c);
+            else if (buffer.Length > 0 && buffer[^1] != ' ') buffer.Append(' ');
+        }
+        if (buffer.Length > 0 && char.IsHighSurrogate(buffer[^1])) buffer.Length--;
+        return buffer.ToString().TrimEnd() + (position < value.Length ? "…" : "");
     }
     private sealed record PartProjection(IReadOnlyList<ToolActivity> Value);
     private static readonly ConditionalWeakTable<ToolActivity, PartProjection> Parts = new();
+    public void PreparePresentation()
+    {
+        _ = CategoryKey; _ = Summary; _ = WaitDurationMs;
+        // DisplayParts already produces per-file leaves. A leaf still contains its patch header;
+        // splitting it recursively would keep producing another identical leaf.
+        foreach (var part in DisplayParts()) if (!ReferenceEquals(this, part))
+        { _ = part.CategoryKey; _ = part.Summary; _ = part.WaitDurationMs; }
+    }
     public IReadOnlyList<ToolActivity> DisplayParts() => Parts.GetValue(this, static tool => new(tool.BuildDisplayParts())).Value;
     private IReadOnlyList<ToolActivity> BuildDisplayParts()
     {

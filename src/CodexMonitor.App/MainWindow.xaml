@@ -38,7 +38,7 @@
                       <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <Ellipse x:Name="UpdateDot" Grid.Column="1" Width="7" Height="7" VerticalAlignment="Center" Fill="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind UpdatedVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind UpdatedText, Mode=OneWay}" AutomationProperties.Name="{x:Bind UpdatedText, Mode=OneWay}"/>
                     </Grid>
-                    <TextBlock Grid.Row="1" Text="{x:Bind Folder, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Phase="1" Grid.Row="1" Text="{x:Bind Folder, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
                     <Grid Grid.Row="2">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <Grid ColumnSpacing="6">

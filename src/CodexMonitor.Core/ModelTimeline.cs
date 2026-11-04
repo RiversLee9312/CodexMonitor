@@ -1,14 +1,15 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace CodexMonitor.Core;
 
 /// <summary>Observed configuration is a live hint, never a substitute for historical per-turn evidence.</summary>
 public sealed class ModelTimeline
 {
-    private readonly Dictionary<string, string> _current = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string Thread, string Turn), string> _turns = [];
-    private readonly Dictionary<string, string> _active = new(StringComparer.Ordinal);
-    private readonly Dictionary<(string Thread, string Item), string> _items = [];
+    private readonly ConcurrentDictionary<string, string> _current = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(string Thread, string Turn), string> _turns = [];
+    private readonly ConcurrentDictionary<string, string> _active = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(string Thread, string Item), string> _items = [];
     public string? ForItem(string thread, string item) => _items.GetValueOrDefault((thread, item));
     public void Remember(string thread, string item, string? model) { if (model is { Length: > 0 }) _items.TryAdd((thread, item), model); }
     public string? Current(string thread) => _current.GetValueOrDefault(thread);

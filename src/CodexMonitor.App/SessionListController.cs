@@ -24,6 +24,7 @@ public sealed partial class MainWindow
     private long _sessionPageIntent, _sessionConsumedPageIntent;
     private double _sessionPreviousOffset;
     private bool _sessionPageCheckQueued;
+    private bool _sessionAwaitingLayout;
     private long _restoringSessionAnchor;
     private SessionDateField _sessionDateField;
     private DateOnly? _sessionDateFrom, _sessionDateThrough;
@@ -70,7 +71,7 @@ public sealed partial class MainWindow
             if (_resetSessionViewport) { _sessionScroll?.ChangeView(null, 0, null, true); _resetSessionViewport = false; }
             SessionCount.Text = _text.Format(listing.RemoteIncomplete ? "SessionCountAtLeast" : "SessionCount", _text.Number(listing.MatchingCount));
             SetSessionLoading(false); TrackSessionListScroll();
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { SessionList.UpdateLayout(); RequestMoreSessions(); });
+            QueueSessionPageCheck();
             return true;
         }
         catch (OperationCanceledException) { return false; }
@@ -103,13 +104,13 @@ public sealed partial class MainWindow
     {
         if (_closing || _sessionPageCheckQueued) return;
         _sessionPageCheckQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { _sessionPageCheckQueued = false; if (!_closing) { SessionList.UpdateLayout(); RequestMoreSessions(); } });
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { _sessionPageCheckQueued = false; if (!_closing) RequestMoreSessions(); });
     }
     private void OnSessionNavigationInput()
     { ++_sessionAnchorInputVersion; _restoringSessionAnchor = 0; _pendingSessionAnchor = null; }
     private void RequestMoreSessions()
     {
-        if (_closing || _restoringSessionAnchor != 0 || _sessionQueryLoading || _sessionQueryCancellation is not null || !_sessionHasMore || _sessionCatalog is null || _sessionScroll is null ||
+        if (_closing || _sessionAwaitingLayout || _restoringSessionAnchor != 0 || _sessionQueryLoading || _sessionQueryCancellation is not null || !_sessionHasMore || _sessionCatalog is null || _sessionScroll is null ||
             _sessionScroll.ScrollableHeight - _sessionScroll.VerticalOffset > Math.Max(200, _sessionScroll.ViewportHeight) ||
             _sessionPageIntent <= _sessionConsumedPageIntent && _sessionScroll.ScrollableHeight > 1) return;
         _sessionConsumedPageIntent = _sessionPageIntent;

@@ -14,13 +14,29 @@ using Microsoft.UI.Xaml.Input;
 namespace CodexMonitor.App;
 
 [WinRT.GeneratedBindableCustomProperty]
-public sealed partial class SessionRow(SessionInfo session, LocalizationService text, bool connected = false, bool hasUnread = false) : INotifyPropertyChanged
+public sealed partial class SessionRow : INotifyPropertyChanged
 {
-    private LocalizationService _text = text;
-    private bool _connected = connected;
-    public SessionInfo Session { get; private set; } = session;
-    public bool HasUnread { get; private set; } = hasUnread;
-    public string Title => string.IsNullOrWhiteSpace(Session.Title) ? _text["UntitledSession"] : Session.Title.Replace('\n', ' ');
+    private LocalizationService _text;
+    private bool _connected;
+    public SessionInfo Session { get; private set; }
+    public bool HasUnread { get; private set; }
+    public string Title { get; private set; }
+    public SessionRow(SessionInfo session, LocalizationService text, bool connected = false, bool hasUnread = false)
+    { Session = session; _text = text; _connected = connected; HasUnread = hasUnread; Title = DisplayTitle(session.Title, text); }
+    // TextTrimming still shapes its entire input. Metadata can contain a full, multi-megabyte prompt.
+    // Keep the original on Session for search; never hand it to single-line XAML or UIA.
+    internal static string DisplayTitle(string? title, LocalizationService text)
+    {
+        if (string.IsNullOrEmpty(title)) return text["UntitledSession"];
+        var length = Math.Min(180, title.Length);
+        if (length < title.Length && char.IsHighSurrogate(title[length - 1])) length--;
+        var buffer = new System.Text.StringBuilder(length + 1);
+        foreach (var character in title.AsSpan(0, length))
+            if (!char.IsWhiteSpace(character)) buffer.Append(character);
+            else if (buffer.Length > 0 && buffer[^1] != ' ') buffer.Append(' ');
+        var value = buffer.ToString().TrimEnd();
+        return value.Length == 0 ? text["UntitledSession"] : value + (length < title.Length ? "…" : "");
+    }
     public string Folder => (Session.ParentId is not null ? _text["ChildAgent"] + " · " : "") + Session.FolderName;
     public bool IsRunning => _connected && Session.IsLive && !Session.IsArchived && Session.State is SessionState.Active or SessionState.Waiting;
     public string State => IsRunning && Session.State == SessionState.Active ? RunningText : _text.State(Session.State);
@@ -40,6 +56,7 @@ public sealed partial class SessionRow(SessionInfo session, LocalizationService 
         var changedContent = observeContent && SessionMetadata.ContentChanged(Session, session);
         if (changedContent && !selected) HasUnread = true;
         if (selected) HasUnread = false;
+        if (!ReferenceEquals(Session.Title, session.Title) || _text.LanguageTag != text.LanguageTag) Title = DisplayTitle(session.Title, text);
         Session = session; _text = text; _connected = connected;
         NotifyChanges(old);
     }
@@ -52,7 +69,7 @@ public sealed partial class SessionRow(SessionInfo session, LocalizationService 
         if (_connected == connected) return;
         var old = Values(); _connected = connected; NotifyChanges(old);
     }
-    public void MarkRead() { var old = Values(); HasUnread = false; NotifyChanges(old); }
+    public void MarkRead() { if (!HasUnread) return; var old = Values(); HasUnread = false; NotifyChanges(old); }
     private Dictionary<string, object> Values() => new()
     {
         [nameof(Session)] = Session, [nameof(Title)] = Title, [nameof(Folder)] = Folder, [nameof(State)] = State,
@@ -166,12 +183,14 @@ public sealed partial class ActivityDisclosure : Button
 
 public sealed partial class TranscriptCard : UserControl
 {
+    private static readonly Regex InlineMarkup = new(@"(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?://[^\s)]+\))", RegexOptions.NonBacktracking);
     public static readonly DependencyProperty RowProperty = DependencyProperty.Register(nameof(Row), typeof(EntryRow), typeof(TranscriptCard), new PropertyMetadata(null, Changed));
     public EntryRow? Row { get => (EntryRow?)GetValue(RowProperty); set => SetValue(RowProperty, value); }
     private EntryRow? _observed;
+    private EntryRow? _rendered;
     public TranscriptCard()
     {
-        Loaded += (_, _) => { Observe(); RefreshContent(); AccessibilitySupport.NormalizeIconsAfterLayout(this); };
+        Loaded += (_, _) => { Observe(); if (!ReferenceEquals(_rendered, Row)) RefreshContent(); AccessibilitySupport.NormalizeIconsAfterLayout(this); };
         Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; };
     }
     private static void Changed(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -186,6 +205,7 @@ public sealed partial class TranscriptCard : UserControl
     private void RowUpdated(object? sender, PropertyChangedEventArgs args) => RefreshContent();
     private void RefreshContent()
     {
+        _rendered = Row;
         if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ActivityGroupView group } && group.List is ListView list && list.ItemsSource is ObservableCollection<EntryRow> children &&
             children.Count > 0 && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
         {
@@ -542,7 +562,7 @@ public sealed partial class TranscriptCard : UserControl
     private static void AddInline(Paragraph paragraph, string text)
     {
         int end = 0;
-        foreach (Match match in Regex.Matches(text, @"(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?://[^\s)]+\))"))
+        foreach (Match match in InlineMarkup.Matches(text))
         {
             if (match.Index > end) paragraph.Inlines.Add(new Run { Text = text[end..match.Index] });
             var s = match.Value;
@@ -565,12 +585,20 @@ public sealed partial class TranscriptCard : UserControl
 
 internal static class ThemeExtensions
 {
+    private static readonly Dictionary<(Type Type, string Property, string Key, Style? BasedOn), Style> ResourceStyles = [];
+    private static readonly Dictionary<Style, string> ResourceStyleProperties = [];
     // ThemeResource bindings keep native contrast themes and runtime light/dark changes intact.
     public static void SetResourceReference(this FrameworkElement element, DependencyProperty property, string key)
     {
         var name = property == Border.BackgroundProperty ? "Background" : property == Border.BorderBrushProperty ? "BorderBrush" : "Foreground";
-        var style = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load($"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='{element.GetType().Name}'><Setter Property='{name}' Value='{{ThemeResource {key}}}'/></Style>");
-        style.BasedOn = element.Style;
+        var basis = element.Style;
+        if (basis is not null && ResourceStyleProperties.GetValueOrDefault(basis) == name) basis = basis.BasedOn;
+        var identity = (element.GetType(), name, key, basis);
+        if (!ResourceStyles.TryGetValue(identity, out var style))
+        {
+            style = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load($"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='{element.GetType().Name}'><Setter Property='{name}' Value='{{ThemeResource {key}}}'/></Style>");
+            style.BasedOn = basis; ResourceStyles.Add(identity, style); ResourceStyleProperties.Add(style, name);
+        }
         element.Style = style;
     }
 }

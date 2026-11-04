@@ -21,6 +21,39 @@ public partial class TestApp : Application
         ReviewWindow = new CodexMonitor.App.MainWindow(reviewMode: true);
         ReviewWindow.Title = "Codex Monitor · MSTest";
         ReviewWindow.Activate();
+        if (Environment.GetCommandLineArgs().Contains("--manual-review-navigation"))
+        {
+            ReviewWindow.Title = "Codex Monitor · Navigation review";
+            await CodexMonitor.App.MainWindow.SettleAsync();
+            await ReviewWindow.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+            var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-wheel-" + Guid.NewGuid() + ".jsonl");
+            await File.WriteAllLinesAsync(path, Enumerable.Range(0, 120).Select(i => System.Text.Json.JsonSerializer.Serialize(new
+            { type = "event_msg", timestamp = DateTimeOffset.UtcNow, payload = new { type = "agent_message", message = "Response " + i + "\n\n" + string.Concat(Enumerable.Repeat("Selectable **message** with `code` and a [link](https://example.com).\n", 30)) } })));
+            var prompt = string.Concat(Enumerable.Repeat("## Task\n请检查实现、注释和测试。 Preserve state and reject stale results.\n", 4100));
+            var clock = System.Diagnostics.Stopwatch.StartNew(); double previous = 0, maxGap = 0; int beats = 0;
+            _reviewTimer = ReviewWindow.DispatcherQueue.CreateTimer(); _reviewTimer.Interval = TimeSpan.FromMilliseconds(16);
+            _reviewTimer.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; maxGap = Math.Max(maxGap, now - previous); previous = now; beats++; };
+            _reviewTimer.Start();
+            await ReviewWindow.ReviewSessionCatalogAsync(Enumerable.Range(0, 1000).Select(i => new CodexMonitor.Core.SessionInfo
+            { Id = "wheel-" + i, Title = "Conversation " + i + (i % 3 == 0 ? "\n" + prompt : ""), FilePath = path, State = CodexMonitor.Core.SessionState.Completed, CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i) }).ToArray());
+            var output = Environment.GetEnvironmentVariable("CODEX_MONITOR_MANUAL_STATE");
+            var telemetry = ReviewWindow.DispatcherQueue.CreateTimer(); telemetry.Interval = TimeSpan.FromMilliseconds(250); bool writing = false;
+            telemetry.Tick += async (_, _) =>
+            {
+                if (writing || string.IsNullOrEmpty(output)) return;
+                writing = true;
+                try
+                {
+                    var state = System.Text.Json.JsonSerializer.Serialize(new { MaxDispatcherGapMs = maxGap, Beats = beats, Rows = ReviewWindow.ReviewSessionRows.Count,
+                        Selected = (ReviewWindow.ReviewSelectedRow as CodexMonitor.App.SessionRow)?.Session.Id, Loading = ReviewWindow.ReviewTranscriptLoading, Messages = ReviewWindow.ReviewMessageRows.Count });
+                    await Task.Run(() => File.WriteAllTextAsync(output, state));
+                }
+                finally { writing = false; }
+            };
+            telemetry.Start();
+            ReviewWindow.Closed += (_, _) => { _reviewTimer.Stop(); telemetry.Stop(); File.Delete(path); };
+            return;
+        }
         if (Environment.GetCommandLineArgs().Any(a => a is "--manual-review" or "--manual-review-sessions"))
         {
             ReviewWindow.Title = "Codex Monitor · Review";

@@ -214,7 +214,7 @@ public sealed class TranscriptParser
             entries.Add(candidate);
         }
         session = session with { State = state, ActiveTurnId = turnId ?? (startOffset > 0 && state is SessionState.RecordedActive or SessionState.Active or SessionState.Waiting ? session.ActiveTurnId : null) };
-        foreach (var entry in entries) { ct.ThrowIfCancellationRequested(); if (entry.Tool is { CategoryKey: "ToolFileChanges" } tool) _ = tool.DisplayParts(); }
+        foreach (var entry in entries) { ct.ThrowIfCancellationRequested(); entry.Tool?.PreparePresentation(); }
         return new(session, entries.OrderBy(e => e.Timestamp).ToArray(), invalid, unknown, tokens);
     }
     private static string MirrorKey(TranscriptEntry entry)
