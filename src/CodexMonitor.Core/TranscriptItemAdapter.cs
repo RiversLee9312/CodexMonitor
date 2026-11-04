@@ -42,10 +42,11 @@ public static class TranscriptItemAdapter
         var type = item.Str("type", item.Str("item_type"));
         type = type is "Extension" or "extension" ? item.Str("kind") : type;
         type = type.Length == 0 ? type : char.ToLowerInvariant(type[0]) + type[1..];
+        if (type.Equals("clock.sleep", StringComparison.OrdinalIgnoreCase) || type == "clock__sleep") type = "sleep";
         type = type switch { "agent_message" when item.Field("author").ValueKind == JsonValueKind.Undefined => "agentMessage", "assistant_message" => "agentMessage", "command_execution" => "commandExecution", "file_change" => "fileChange", "mcp_tool_call" => "mcpToolCall", "web_search" => "webSearch", "todo_list" or "plan_update" => "plan", _ => type };
         node["type"] = type;
         if (type == "commandExecution" && item.Field("command").ValueKind == JsonValueKind.Array) node["command"] = CommandText(item.Field("command"));
-        foreach (var (from, to) in new[] { ("summary_text","summary"), ("raw_content","content"), ("aggregated_output","aggregatedOutput"), ("exit_code","exitCode"), ("parsed_cmd","commandActions"), ("process_id","processId"), ("agent_thread_id","agentThreadId"), ("agent_path","agentPath"), ("reasoning_effort","reasoningEffort"), ("server_name","server"), ("tool_name","tool") })
+        foreach (var (from, to) in new[] { ("summary_text","summary"), ("raw_content","content"), ("aggregated_output","aggregatedOutput"), ("exit_code","exitCode"), ("parsed_cmd","commandActions"), ("process_id","processId"), ("agent_thread_id","agentThreadId"), ("agent_path","agentPath"), ("reasoning_effort","reasoningEffort"), ("server_name","server"), ("tool_name","tool"), ("duration_ms","durationMs") })
             if (!node.ContainsKey(to) && node[from] is { } value) node[to] = value.DeepClone();
         if (node["status"] is JsonValue status && status.TryGetValue<string>(out var statusText) && statusText.Length > 0) node["status"] = char.ToLowerInvariant(statusText[0]) + statusText[1..];
         if (!node.ContainsKey("durationMs") && item.Field("duration").Field("secs").TryNumber(out var seconds))

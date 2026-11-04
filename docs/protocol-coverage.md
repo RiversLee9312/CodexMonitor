@@ -44,3 +44,4 @@
 按 [OpenAI Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling) 的 `tools.*`、顶层 `await` 和 `text(...)` 输出模型解析已保存的编排输入。使用 Acornima ECMAScript AST，不执行记录中的 JavaScript。支持括号、注释、单双引号、模板/插值、静态字符串拼接、对象与数组、已知值展开、变量/工具别名与解构、常量分支、async 函数与 IIFE、结果成员访问、JSON 包装、then、Promise.all/allSettled、已知数组 map/forEach 和 for-of。
 
 单次调用复用命令、补丁、等待、MCP 等原有语义；批次在一个折叠活动内逐项显示参数，原生镜像逐条补充结果与状态。实际执行的相同调用仍逐条保留。原始输入和聚合输出保留用于导出。运行时参数、未知条件/函数、无法确定的变更、超出深度/步骤/大小限制或未完成的代码保留折叠源码，不推测执行结果；这不是通用 JavaScript 解释器，也不保证还原任意程序。当前 CLI 的18种 ResponseItem 清单与网页 Responses API 的实验性 program/program_output 契约分别管理。
+0.1.9：安装版真实记录补充 clock.sleep / clock__sleep 扩展别名与 duration_ms，按同一 sleep 投影、状态和 wire ID 合并，避免多出通用事件行。

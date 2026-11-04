@@ -1,5 +1,5 @@
 #requires -Version 7.2
-param([string]$Version = '0.1.8', [switch]$SkipPublish)
+param([string]$Version = '0.1.9', [switch]$SkipPublish)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $SkipPublish) { & (Join-Path $PSScriptRoot 'Publish.ps1') }

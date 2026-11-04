@@ -98,7 +98,7 @@ public sealed class ProtocolParityUiTests
     public async Task ServerSleepAndLocalSleepUseTheSameClockAndLiveWaitEndsCorrectly(string theme, string language, bool live)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
-        using var doc = JsonDocument.Parse("""{"id":"sleep","type":"sleep","durationMs":30000}""");
+        using var doc = JsonDocument.Parse(language == "zh-CN" ? """{"id":"sleep","type":"Extension","kind":"clock.sleep","durationMs":30000}""" : """{"id":"sleep","type":"sleep","durationMs":30000}""");
         var entry = CodexClient.ParseItem(doc.RootElement, lifecycle: live ? ToolActivityState.Running : ToolActivityState.Completed);
         await window.ShowProtocolEntryReviewAsync(entry, live: live);
         Assert.AreEqual(live, window.ReviewWaitAnimating);

@@ -73,12 +73,14 @@ public sealed class TranscriptTests
         var fallback = result.Entries.Single(e => e.RawJson is not null); StringAssert.Contains(fallback.Text, "Retained"); Assert.IsFalse(fallback.Text.Contains("SECRET"));
     }
     [TestMethod]
-    public async Task NativeCompletedMirrorsReplaceCallsWithoutDuplicatingMessagesOrWaits()
+    [DataRow("sleep")]
+    [DataRow("clock.sleep")]
+    public async Task NativeCompletedMirrorsReplaceCallsWithoutDuplicatingMessagesOrWaits(string kind)
     {
         var result = await Parse(
             """{"type":"response_item","payload":{"type":"function_call","call_id":"sleep-call","name":"clock.sleep","arguments":"{\"duration_ms\":30000}"}}""",
             """{"type":"response_item","payload":{"type":"function_call_output","call_id":"sleep-call","output":"Sleep completed."}}""",
-            """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"Extension","kind":"sleep","id":"sleep-call","durationMs":30000}}}""",
+            JsonSerializer.Serialize(new { type = "event_msg", payload = new { type = "item_completed", item = new { type = "Extension", kind, id = "sleep-call", durationMs = 30000 } } }),
             """{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"a","content":[{"type":"Text","text":"A reply"}]}}}""",
             """{"type":"event_msg","payload":{"type":"agent_message","message":"A reply"}}""");
         Assert.HasCount(2, result.Entries); Assert.AreEqual(30000L, result.Entries[0].Tool?.WaitDurationMs); Assert.AreEqual(ToolActivityState.Completed, result.Entries[0].Tool?.State);
