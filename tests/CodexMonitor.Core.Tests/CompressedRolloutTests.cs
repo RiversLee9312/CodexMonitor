@@ -18,7 +18,12 @@ public sealed class CompressedRolloutTests
     private static string Transcript(int records = 3) => "{\"type\":\"session_meta\",\"payload\":{\"id\":\"" + Id + "\",\"timestamp\":\"2026-09-05T03:00:00Z\",\"cwd\":\"C:\\\\Example\"}}\n" +
         string.Concat(Enumerable.Range(0, records).Select(i => "{\"timestamp\":\"2026-09-05T03:00:00Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"" + (i == 0 ? "user" : "assistant") + "\",\"content\":[{\"text\":\"Message " + i + "\"}]}}\n"));
     private static async Task Compress(string path, string text)
-    { await using var output = File.Create(path + ".zst"); await using var encoder = new CompressionStream(output); await encoder.WriteAsync(Encoding.UTF8.GetBytes(text)); }
+    {
+        DateTime? modified = File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+        await using (var output = File.Create(path + ".zst"))
+        { await using var encoder = new CompressionStream(output); await encoder.WriteAsync(Encoding.UTF8.GetBytes(text)); }
+        if (modified is { } time) File.SetLastWriteTimeUtc(path + ".zst", time); // Codex preserves the original mtime.
+    }
     [TestMethod]
     public async Task CompressedHistoryIsListedAndReadWithoutChangingTheCodexFiles()
     {

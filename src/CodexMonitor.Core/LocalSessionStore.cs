@@ -9,6 +9,7 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
     private readonly ConcurrentDictionary<string, (long Length, DateTime Modified, SessionInfo Info)> _cache = new();
     private readonly SemaphoreSlim _scan = new(1);
     private bool _loadedCache;
+    private IReadOnlyDictionary<string, SessionInfo> _lastSessions = new Dictionary<string, SessionInfo>();
     public string Home { get; } = Path.GetFullPath(home);
     public static string DefaultHome => Environment.GetEnvironmentVariable("CODEX_HOME") is { Length: > 0 } h ? h :
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
@@ -35,7 +36,7 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
         }
         var changed = 0;
         var database = LocalSessionDatabase.Read(Home, ct);
-        var previous = _cache.Values.Select(v => v.Info).DistinctBy(s => s.Id).ToDictionary(s => s.Id, StringComparer.Ordinal);
+        var previous = _lastSessions.Count > 0 ? _lastSessions : _cache.Values.Select(v => v.Info).OrderBy(s => s.IsArchived).ThenBy(s => RolloutFiles.IsCompressed(s.FilePath)).ThenByDescending(s => s.UpdatedAt).DistinctBy(s => s.Id).ToDictionary(s => s.Id, StringComparer.Ordinal);
         var titles = new Dictionary<string, string>();
         var indexPath = Path.Combine(Home, "session_index.jsonl");
         if (File.Exists(indexPath))
@@ -156,6 +157,12 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
                 }
                 if (database.TryGetValue(info.Id, out var indexed)) info = info with { Title = indexed.Title.Length > 0 ? indexed.Title : info.Title, Cwd = info.Cwd.Length > 0 ? info.Cwd : indexed.Cwd, Model = info.Model.Length > 0 ? info.Model : indexed.Model, Source = info.Source.Length > 0 ? info.Source : indexed.Source, IsArchived = info.IsArchived || indexed.IsArchived, ParentId = info.ParentId ?? indexed.ParentId };
                 if (titles.TryGetValue(info.Id, out var title) && !string.IsNullOrWhiteSpace(title)) info = info with { Title = title };
+                if (RolloutFiles.IsCompressed(info.FilePath) && previous.TryGetValue(info.Id, out var prior) && !RolloutFiles.IsCompressed(prior.FilePath) &&
+                    string.Equals(RolloutFiles.PlainPath(info.FilePath), prior.FilePath, StringComparison.OrdinalIgnoreCase) &&
+                    info.FileVersion is { } nextFile && prior.FileVersion is { } oldFile && Math.Abs((nextFile.LastWriteTimeUtc - oldFile.LastWriteTimeUtc).TotalSeconds) <= 1)
+                    info = info with { CreatedAt = prior.CreatedAt, UpdatedAt = prior.UpdatedAt, ContentRevision = prior.ContentRevision };
+                if (_cache.TryGetValue(path, out var cached) && cached.Info != info)
+                { _cache[path] = (cached.Length, cached.Modified, info); Interlocked.Exchange(ref changed, 1); }
                 result.Add(info);
             }
             catch (IOException) { } // A rollout can be moved to the archive during enumeration.
@@ -172,7 +179,10 @@ public sealed partial class LocalSessionStore(string home, string? cachePath = n
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
-        return result.OrderBy(x => x.IsArchived).ThenBy(x => RolloutFiles.IsCompressed(x.FilePath)).ThenByDescending(x => x.UpdatedAt).DistinctBy(x => x.Id).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id, StringComparer.Ordinal).ToArray();
+        var ordered = result.OrderBy(x => x.IsArchived).ThenBy(x => RolloutFiles.IsCompressed(x.FilePath))
+            .ThenBy(x => previous.TryGetValue(x.Id, out var old) && string.Equals(RolloutFiles.PlainPath(old.FilePath), RolloutFiles.PlainPath(x.FilePath), StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenByDescending(x => x.UpdatedAt).DistinctBy(x => x.Id).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.CreatedAt).ThenBy(x => x.Id, StringComparer.Ordinal).ToArray();
+        _lastSessions = ordered.ToDictionary(s => s.Id, StringComparer.Ordinal); return ordered;
         }
         finally { _scan.Release(); }
     }
