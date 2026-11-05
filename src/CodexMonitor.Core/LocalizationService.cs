@@ -35,6 +35,7 @@ public sealed class LocalizationService
     public string this[string key] => _strings.GetValueOrDefault(key, _fallback.GetValueOrDefault(key, key));
     public string Format(string key, params object[] values) => string.Format(Culture, this[key], values);
     public string DateTime(DateTimeOffset value) => value == default ? this["NotAvailable"] : value.ToLocalTime().ToString("g", Culture);
+    public string MessageTime(DateTimeOffset value, DateTimeOffset? now = null) => value == default ? "" : value.ToLocalTime().ToString(value.ToLocalTime().Date == (now ?? DateTimeOffset.Now).ToLocalTime().Date ? "t" : "g", Culture);
     public string Number(long value) => value.ToString("N0", Culture);
     public static Dictionary<string, string> Read(string tag)
     {

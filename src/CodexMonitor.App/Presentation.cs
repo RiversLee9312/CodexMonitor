@@ -86,6 +86,9 @@ public sealed partial class SessionRow : INotifyPropertyChanged
 [WinRT.GeneratedBindableCustomProperty]
 public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService text, IReadOnlyList<TranscriptEntry>? activities = null, HashSet<string>? expanded = null, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, Action? earlier = null) : INotifyPropertyChanged
 {
+    public TurnInfo? Turn { get; private set; }
+    public Func<TurnInfo, CancellationToken, Task<TurnInfo?>>? ReadTurn { get; private set; }
+    private DateOnly _displayDay = DateOnly.FromDateTime(DateTime.Now);
     public TranscriptEntry Entry { get; private set; } = entry;
     public LocalizationService Text { get; private set; } = text;
     public IReadOnlyList<TranscriptEntry> Activities { get; private set; } = activities ?? new TranscriptEntry[] { entry };
@@ -96,22 +99,26 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
     public Func<bool>? CanFollow { get; private set; } = canFollow;
     public Action? Earlier { get; private set; } = earlier;
     public bool IsActivityGroup => Entry.Kind is EntryKind.Tool or EntryKind.Reasoning or EntryKind.Event;
+    public bool IsWorkProcess { get; private set; }
+    public bool AutoCollapseWork { get; private set; }
+    public bool IsCurrentWork { get; private set; }
     public string ActivityTitle => Text.Format("Activities", Text.Number(Activities.Count));
-    public bool IsGroupCollapsed => Expanded.Contains(Entry.Id + ":group:collapsed");
-    public bool IsGroupBusy => IsLive && Activities.Any(e => e.Tool?.State is ToolActivityState.Running or ToolActivityState.Generating);
+    public bool IsGroupCollapsed => AutoCollapseWork ? !IsGroupBusy && !Expanded.Contains(Entry.Id + ":group:manual") : Expanded.Contains(Entry.Id + ":group:collapsed");
+    public bool IsGroupBusy => IsLive && (IsCurrentWork || Activities.Any(e => e.Tool?.State is ToolActivityState.Running or ToolActivityState.Generating));
     public string ActivitySummary => string.Join(" · ", Activities.GroupBy(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.State == ToolActivityState.Generating ? "Working" : e.Tool?.CategoryKey ?? "Tool")
         .Take(4).Select(g => Text[g.Key] + " " + Text.Number(g.Count()))) + (Activities.Select(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.CategoryKey ?? "Tool").Distinct().Count() > 4 ? " · …" : "");
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
-    public string Time => Entry.Timestamp == default ? "" : Entry.Timestamp.ToLocalTime().ToString("t", Text.Culture);
+    public string Time => Text.MessageTime(Entry.Timestamp);
     public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
         (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
         { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
         Role + (Entry.Kind == EntryKind.Assistant && Entry.Model is { Length: > 0 } model ? ", " + Text["FieldModel"] + " " + model : "") + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Update(EntryRow next)
-    { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; PropertyChanged?.Invoke(this, new(null)); }
-    public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities);
-    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, string? liveTurnId = null, Dictionary<string, string>? groupIdentities = null, Action? earlier = null)
+    { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; Turn = next.Turn; ReadTurn = next.ReadTurn; IsWorkProcess = next.IsWorkProcess; AutoCollapseWork = next.AutoCollapseWork; IsCurrentWork = next.IsCurrentWork; _displayDay = next._displayDay; PropertyChanged?.Invoke(this, new(null)); }
+    public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities) && Turn == row.Turn && AutoCollapseWork == row.AutoCollapseWork && IsCurrentWork == row.IsCurrentWork && _displayDay == row._displayDay;
+    public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, string? liveTurnId = null, Dictionary<string, string>? groupIdentities = null, Action? earlier = null,
+        Func<string, TurnInfo?>? turnInfo = null, Func<TurnInfo, CancellationToken, Task<TurnInfo?>>? readTurn = null, bool autoCollapseWork = false)
     {
         var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
         var usedIds = new HashSet<string>(StringComparer.Ordinal);
@@ -121,7 +128,7 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
             var identity = tools.Select(e => groupIdentities?.GetValueOrDefault(e.Id)).FirstOrDefault(id => id is not null && !usedIds.Contains(id)) ?? tools[0].Id;
             usedIds.Add(identity);
             if (groupIdentities is not null) foreach (var tool in tools) groupIdentities[tool.Id] = identity;
-            rows.Add(new(tools[0] with { Id = identity }, text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow, rows.Count == 0 ? earlier : null)); tools.Clear();
+            rows.Add(new(tools[0] with { Id = identity }, text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow, rows.Count == 0 ? earlier : null) { IsWorkProcess = true }); tools.Clear();
         }
         foreach (var item in entries)
         {
@@ -142,6 +149,27 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
         var lastActivity = rows.LastOrDefault(r => r.IsActivityGroup);
         if (live) foreach (var row in rows.Where(r => r.IsActivityGroup))
             row.IsLive = liveTurnId is { Length: > 0 } && row.Activities.Any(e => e.TurnId == liveTurnId) || ReferenceEquals(row, lastActivity) && row.Activities.All(e => string.IsNullOrEmpty(e.TurnId));
+        foreach (var row in rows.Where(r => r.IsActivityGroup))
+        { row.AutoCollapseWork = autoCollapseWork; row.IsCurrentWork = row.IsLive && ReferenceEquals(rows.LastOrDefault(), row); }
+        var groups = new Dictionary<string, List<EntryRow>>(StringComparer.Ordinal); string observed = "observed:first";
+        foreach (var row in rows)
+        {
+            if (row.Entry.Kind == EntryKind.User) observed = "observed:" + row.Entry.Id;
+            var key = string.IsNullOrEmpty(row.Entry.TurnId) ? observed : row.Entry.TurnId;
+            if (!groups.TryGetValue(key, out var members)) groups[key] = members = [];
+            members.Add(row);
+        }
+        foreach (var (key, members) in groups)
+        {
+            var parts = members.SelectMany(r => r.Activities).ToArray();
+            var knownId = key.StartsWith("observed:", StringComparison.Ordinal) ? "" : key;
+            var details = turnInfo?.Invoke(knownId) ?? new TurnInfo(knownId);
+            var times = parts.Where(e => e.Timestamp != default).Select(e => e.Timestamp).ToArray();
+            var models = parts.Select(e => e.Model).Append(details.Model).Where(m => !string.IsNullOrEmpty(m)).Distinct(StringComparer.Ordinal).ToArray();
+            members[^1].Turn = details with { Model = models.Length > 0 ? string.Join(" → ", models) : null, LoadedItems = parts.Length,
+                FirstRecord = times.Length > 0 ? times.Min() : null, LastRecord = times.Length > 0 ? times.Max() : null };
+            members[^1].ReadTurn = knownId.Length > 0 ? readTurn : null;
+        }
         return rows;
     }
     public override string ToString() => AccessibleName;
@@ -192,13 +220,14 @@ public sealed partial class TranscriptCard : UserControl
     private IReadOnlyList<TranscriptEntry>? _renderedActivities;
     private string? _renderedLanguage;
     private bool _renderedLive;
+    private TurnInfo? _renderedTurn;
     public TranscriptCard()
     {
         Loaded += (_, _) =>
         {
             Observe();
             if (Row is { } row && (!ReferenceEquals(_rendered, row) || !ReferenceEquals(_renderedEntry, row.Entry) ||
-                !ReferenceEquals(_renderedActivities, row.Activities) || _renderedLanguage != row.Text.LanguageTag || _renderedLive != row.IsLive)) RefreshContent();
+                !ReferenceEquals(_renderedActivities, row.Activities) || _renderedLanguage != row.Text.LanguageTag || _renderedLive != row.IsLive || _renderedTurn != row.Turn)) RefreshContent();
             AccessibilitySupport.NormalizeIconsAfterLayout(this);
         };
         Unloaded += (_, _) => { if (_observed is not null) _observed.PropertyChanged -= RowUpdated; _observed = null; };
@@ -217,7 +246,8 @@ public sealed partial class TranscriptCard : UserControl
     {
         _rendered = Row;
         _renderedEntry = Row?.Entry; _renderedActivities = Row?.Activities; _renderedLanguage = Row?.Text.LanguageTag; _renderedLive = Row?.IsLive == true;
-        if (Row is { Activities.Count: > 1 } next && Content is Border { Child: ActivityGroupView group } && group.List is ListView list && list.ItemsSource is ObservableCollection<EntryRow> children &&
+        _renderedTurn = Row?.Turn;
+        if (Row is { IsWorkProcess: true } next && Content is Border { Child: ActivityGroupView group } && group.List is RepeaterList list && list.ItemsSource is ObservableCollection<EntryRow> children &&
             children.Count > 0 && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
         {
             var scroll = ScrollViewerIn(list); var follow = next.CanFollow?.Invoke() == true && (scroll is null || scroll.ScrollableHeight - scroll.VerticalOffset < 24);
@@ -272,22 +302,24 @@ public sealed partial class TranscriptCard : UserControl
     }
     internal static void PreserveScroll(DependencyObject container, EntryRow row)
     {
-        if (row.Activities.Count > 1 && ScrollViewerIn(container) is { ScrollableHeight: > 0 } scroll)
+        if (row.IsWorkProcess && ScrollViewerIn(container) is { ScrollableHeight: > 0 } scroll)
             row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
     }
     internal static void ScrollGroupToEnd(DependencyObject container, EntryRow row)
     {
         if (row.IsGroupCollapsed) return;
-        if (row.Activities.Count > 1 && ScrollViewerIn(container) is { } scroll)
+        if (row.IsWorkProcess && ScrollViewerIn(container) is { } scroll)
         { scroll.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); }
     }
     private void Render()
     {
-        if (Row is not { } row) return;
+        if (Row is not { } row) { Content = null; return; }
         var entry = row.Entry;
         if (row.IsActivityGroup)
         {
-            Content = new Border { Margin = new Thickness(12, 0, 12, 0), Child = ToolGroup(row) }; return;
+            var activity = ToolGroup(row);
+            if (activity is not ActivityGroupView && row.Turn is not null) { var activities = new StackPanel { Spacing = 4 }; activities.Children.Add(activity); activities.Children.Add(TurnDetailsPanel.Button(row)); activity = activities; }
+            Content = new Border { Margin = new Thickness(12, 0, 12, 0), Child = activity }; return;
         }
         var panel = new StackPanel { Spacing = 10, Margin = new Thickness(12, 10, 12, 8) };
         var header = new Grid { ColumnSpacing = 12 };
@@ -327,17 +359,20 @@ public sealed partial class TranscriptCard : UserControl
             border.SetResourceReference(Border.BorderBrushProperty, "ControlStrokeColorDefaultBrush");
             border.BorderThickness = new Thickness(1);
         }
-        Content = border;
+        if (row.Turn is null) Content = border;
+        else { var body = new StackPanel { Spacing = 2 }; body.Children.Add(border); body.Children.Add(TurnDetailsPanel.Button(row)); Content = body; }
     }
+    private static DataTemplate? _workItemTemplate;
+    private static Style? _workItemStyle;
     private static FrameworkElement ToolGroup(EntryRow row)
     {
-        if (row.Activities.Count == 1) return ToolRow(row.Activities[0], row);
+        if (!row.IsWorkProcess) return ToolRow(row.Activities[0], row);
         // One inline disclosure per operation, without nested group cards or repeated role/time headers.
-        var template = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:TranscriptCard Row='{Binding}'/></DataTemplate>");
-        var itemStyle = (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='40'/></Style>");
-        var list = new ListView { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        var template = _workItemTemplate ??= (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:TranscriptCard Row='{Binding}'/></DataTemplate>");
+        var itemStyle = _workItemStyle ??= (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='40'/></Style>");
+        var list = new RepeaterList { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
-            ItemContainerTransitions = [], ItemsSource = new ObservableCollection<EntryRow>(row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive, scrollOffsets: row.ScrollOffsets, historyChanged: row.HistoryChanged, canFollow: row.CanFollow))) };
+            Transitions = [], ItemsSource = new ObservableCollection<EntryRow>(row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive, scrollOffsets: row.ScrollOffsets, historyChanged: row.HistoryChanged, canFollow: row.CanFollow))) };
         ScrollViewer.SetIsVerticalScrollChainingEnabled(list, true);
         var userScrolling = false;
         list.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);

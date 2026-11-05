@@ -9,17 +9,19 @@ namespace CodexMonitor.App;
 /// <summary>One stable disclosure around the existing virtualized activity list.</summary>
 internal sealed partial class ActivityGroupView : Grid
 {
-    internal ListView List { get; }
+    internal RepeaterList List { get; }
     internal string Identity => _row.Entry.Id;
     private EntryRow _row;
+    private bool _applying;
+    private FrameworkElement? _footer;
     private readonly ActivityDisclosure _toggle = new();
     private readonly TextBlock _caption = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
     private readonly ProgressRing _ring = new() { Width = 16, Height = 16, IsHitTestVisible = false, VerticalAlignment = VerticalAlignment.Center };
     private readonly FontIcon _chevron = new() { IsTextScaleFactorEnabled = false, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
-    internal ActivityGroupView(EntryRow row, ListView list)
+    internal ActivityGroupView(EntryRow row, RepeaterList list)
     {
         _row = row; List = list;
-        RowDefinitions.Add(new() { Height = GridLength.Auto }); RowDefinitions.Add(new() { Height = GridLength.Auto });
+        RowDefinitions.Add(new() { Height = GridLength.Auto }); RowDefinitions.Add(new() { Height = GridLength.Auto }); RowDefinitions.Add(new() { Height = GridLength.Auto });
         var header = new Grid { ColumnSpacing = 8 }; header.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new()); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         header.Children.Add(_ring); Grid.SetColumn(_caption, 1); header.Children.Add(_caption); Grid.SetColumn(_chevron, 2); header.Children.Add(_chevron);
         _caption.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
@@ -30,15 +32,28 @@ internal sealed partial class ActivityGroupView : Grid
         AutomationProperties.SetAutomationId(_toggle, "ActivityGroup-" + row.Entry.Id);
         _toggle.ExpansionChanged += () =>
         {
+            if (_applying) return;
+            if (_row.AutoCollapseWork && _row.IsGroupBusy && !_toggle.IsExpanded)
+            { _applying = true; _toggle.SetExpanded(true); _applying = false; return; }
             var key = _row.Entry.Id + ":group:collapsed";
-            if (_toggle.IsExpanded) _row.Expanded.Remove(key); else _row.Expanded.Add(key);
+            var manual = _row.Entry.Id + ":group:manual";
+            if (_toggle.IsExpanded) { _row.Expanded.Remove(key); _row.Expanded.Add(manual); }
+            else { _row.Expanded.Add(key); _row.Expanded.Remove(manual); }
             Paint();
         };
         Children.Add(_toggle); SetRow(list, 1); Children.Add(list);
         Update(row);
     }
     internal void Update(EntryRow row)
-    { _row = row; _toggle.SetExpanded(!row.IsGroupCollapsed); Paint(); }
+    {
+        if ((_footer is null) != (row.Turn is null) || _footer is not null && !ReferenceEquals(_row, row))
+        {
+            if (_footer is not null) Children.Remove(_footer);
+            _footer = row.Turn is null ? null : TurnDetailsPanel.Button(row);
+            if (_footer is not null) { SetRow(_footer, 2); Children.Add(_footer); }
+        }
+        _row = row; _applying = true; _toggle.SetExpanded(!row.IsGroupCollapsed); _applying = false; Paint();
+    }
     private void Paint()
     {
         var open = _toggle.IsExpanded;

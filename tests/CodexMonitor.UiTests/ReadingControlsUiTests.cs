@@ -22,7 +22,7 @@ public sealed class ReadingControlsUiTests
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
         await window.ReviewReasoning(summary ? "Public summary stays readable." : "", "Detailed thinking is folded by default.");
-        var toggle = window.ReviewVisualElements<ActivityDisclosure>().Single(); Assert.IsFalse(toggle.IsExpanded);
+        var toggle = window.ReviewVisualElements<ActivityDisclosure>().Single(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t) == "ActivityToggle-thinking-review:thinking"); Assert.IsFalse(toggle.IsExpanded);
         var text = string.Join(" ", window.ReviewVisualElements<TextBlock>().Select(t => t.Text));
         Assert.IsFalse(text.Contains("Detailed thinking"));
         Assert.AreEqual(summary, window.ReviewReasoningHasInlineSummary);

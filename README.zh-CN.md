@@ -1,5 +1,9 @@
 # Codex Monitor
 
+每个轮次末尾的信息按钮可查看已提供的模型、生命周期和用量。设置中的“自动折叠工作过程”会收起已结束且未手动展开的工作过程，正在进行的工作过程始终展开。非当天消息显示日期与时间。
+
+模型信息只采用明确记录。`thread/tokenUsage/updated` 包含轮次 ID，不包含模型名；其中 `last` 是最近一次模型请求，`total` 是当时累计的会话用量，均不冒充整个轮次的用量。历史生命周期通过 `thread/turns/list` 的 `notLoaded` 轻量分页按需获取。参见 [OpenAI app-server 文档](https://learn.chatgpt.com/docs/app-server)。
+
 [English](README.md)
 
 用 C# 和 WinUI 3 编写的 Windows 会话查看器与轻量 Codex CLI 客户端。

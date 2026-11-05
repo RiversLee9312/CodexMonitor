@@ -36,7 +36,7 @@ public sealed class ConversationPresentationUiTests
         Assert.IsTrue(group.IsExpanded); Assert.IsTrue(window.ReviewVisualElements<FrameworkElement>().Any(e => AutomationProperties.GetAutomationId(e) == "Working-pending"));
         Assert.IsFalse(window.ReviewVisualElements<TextBlock>().Any(t => t.Text.Contains("DO_NOT_RENDER_PARTIAL", StringComparison.Ordinal)));
         group.SetExpanded(false); await MainWindow.SettleAsync();
-        var list = window.ReviewVisualElements<ListView>().Single(l => l.ItemsSource is System.Collections.ObjectModel.ObservableCollection<EntryRow> rows && rows.All(r => r.Entry.Kind != EntryKind.Assistant) && rows.Any(r => r.Entry.Id == "summary"));
+        var list = window.ReviewVisualElements<RepeaterList>().Single(l => l.ItemsSource is System.Collections.ObjectModel.ObservableCollection<EntryRow> rows && rows.All(r => r.Entry.Kind != EntryKind.Assistant) && rows.Any(r => r.Entry.Id == "summary"));
         Assert.AreEqual(Visibility.Collapsed, list.Visibility);
         Assert.IsTrue(window.ReviewVisualElements<ProgressRing>().Any(r => r.IsActive && r.Visibility == Visibility.Visible));
         TestContext.AddResultFile(await window.CaptureReviewAsync($"group-collapsed-{theme}-{language}"));

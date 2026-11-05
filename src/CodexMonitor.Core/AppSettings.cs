@@ -10,6 +10,7 @@ public sealed record AppSettings
     public bool UseSharedServer { get; init; }
     public string Language { get; init; } = "";
     public string Theme { get; init; } = "System";
+    public bool AutoCollapseWork { get; init; }
 
     public static string SettingsPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexMonitor", "settings.json");
     public static AppSettings Load()

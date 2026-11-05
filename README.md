@@ -10,7 +10,8 @@ A Windows transcript viewer and lightweight Codex CLI client, built with C# and 
 * Filter by creation or update date: today, the last 7/30 days or a custom range.
 * Automatically page the conversation list in batches of 50, with asynchronous scanning, cancellable search and stable scrolling.
 * Display known models beside each Codex response without relabeling earlier turns.
-* Read commands, patches, MCP results and waiting states. Activity groups start expanded and collapse to a category/count summary.
+* Read commands, patches, MCP results and waiting states in collapsible work processes. An optional setting folds completed work while keeping manual expansions and ongoing work open.
+* Inspect each turn's supplied model, lifecycle and usage details from its trailing info button. Older message times include the date.
 * Use one “Working” placeholder for observed non-message generation; text and reasoning stream directly.
 * Automatically load older history as you scroll up, preserving the visible message and nested output.
 * Answer Codex questions with options, free text or masked private input.
@@ -29,7 +30,7 @@ Local files are authoritative before attachment; app-server is authoritative aft
 
 ## Protocol limits
 
-Historical app-server items do not always include the model used for a reply. Missing information is left blank, not inferred from the provider or current configuration. Local `turn_context` and observed live model events supply labels when available.
+Historical app-server items do not always include the model used for a reply. Missing information is left blank, not inferred from the provider or current configuration. Local `turn_context` and observed live configuration, response and rerouting events supply labels when available. `thread/tokenUsage/updated` is scoped to a turn but contains no model field. Its `last` snapshot is one model request; `total` is cumulative thread usage at that point, neither is presented as the whole turn's usage. On-demand `thread/turns/list` requests lightweight `notLoaded` lifecycle metadata with bounded cursor traversal. See the [official app-server documentation](https://learn.chatgpt.com/docs/app-server).
 
 App-server 0.164.0 does not expose the Responses API’s argument-generation delta stream. Its `item/started` event describes actual activity. The unified placeholder handles explicit generation/progress events supplied by the source; it does not invent an unobservable stage. Search and Markdown export cover the currently loaded window. Scroll upward to bring older history into that window. Unknown payloads retain folded source. Transcript JavaScript is parsed, never executed.
 

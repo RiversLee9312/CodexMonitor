@@ -27,9 +27,8 @@
           </Grid>
           <Grid Grid.Row="3">
             <local:SessionListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
-              <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
-              <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></ListView.ItemContainerStyle>
-              <ListView.ItemTemplate>
+              <local:RepeaterList.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></local:RepeaterList.ItemContainerStyle>
+              <local:RepeaterList.ItemTemplate>
                 <DataTemplate x:DataType="local:SessionRow">
                   <Grid RowSpacing="5" ToolTipService.ToolTip="{x:Bind AccessibleName, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -38,7 +37,7 @@
                       <TextBlock Text="{x:Bind Title, Mode=OneWay}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxLines="1"/>
                       <Ellipse x:Name="UpdateDot" Grid.Column="1" Width="7" Height="7" VerticalAlignment="Center" Fill="{ThemeResource AccentTextFillColorPrimaryBrush}" Visibility="{x:Bind UpdatedVisibility, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind UpdatedText, Mode=OneWay}" AutomationProperties.Name="{x:Bind UpdatedText, Mode=OneWay}"/>
                     </Grid>
-                    <TextBlock x:Phase="1" Grid.Row="1" Text="{x:Bind Folder, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Row="1" Text="{x:Bind Folder, Mode=OneWay}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
                     <Grid Grid.Row="2">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <Grid ColumnSpacing="6">
@@ -50,7 +49,7 @@
                     </Grid>
                   </Grid>
                 </DataTemplate>
-              </ListView.ItemTemplate>
+              </local:RepeaterList.ItemTemplate>
             </local:SessionListView>
             <ProgressRing x:Name="SessionLoadingRing" Width="20" Height="20" IsActive="False" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8" IsHitTestVisible="False"/>
             <StackPanel x:Name="NoSessionsPanel" Visibility="Collapsed" VerticalAlignment="Center" Spacing="8" Margin="8">
@@ -101,11 +100,10 @@
                 <Button x:Name="CloseFindButton" Grid.Column="1" Style="{StaticResource IconButtonStyle}" Click="OnCloseFind"><FontIcon IsTextScaleFactorEnabled="False" Glyph="&#xE711;" FontSize="16"/></Button>
               </Grid>
               <Grid Grid.Row="1">
-                <ListView x:Name="MessageList" Background="Transparent" SelectionMode="None" IsItemClickEnabled="False" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                  <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel ItemsUpdatingScrollMode="KeepItemsInView"/></ItemsPanelTemplate></ListView.ItemsPanel>
-                  <ListView.ItemContainerStyle><Style TargetType="ListViewItem" x:DataType="local:EntryRow"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></ListView.ItemContainerStyle>
-                  <ListView.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></ListView.ItemTemplate>
-                </ListView>
+                <local:RepeaterList x:Name="MessageList" Background="Transparent" SelectionMode="None" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                      <local:RepeaterList.ItemContainerStyle><Style TargetType="ListViewItem" x:DataType="local:EntryRow"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></local:RepeaterList.ItemContainerStyle>
+                  <local:RepeaterList.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></local:RepeaterList.ItemTemplate>
+                </local:RepeaterList>
                 <TextBlock x:Name="NoMessagesText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <ProgressRing x:Name="LoadingRing" IsActive="False" Width="32" Height="32" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                 <ProgressRing x:Name="EarlierRing" IsActive="False" Width="20" Height="20" Margin="0,8,0,0" HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" IsHitTestVisible="False"/>

@@ -31,7 +31,8 @@ public sealed record TranscriptEntry(string Id, EntryKind Kind, string Text, Dat
     string? TurnId = null, string? Model = null);
 
 public sealed record TranscriptSnapshot(SessionInfo Session, IReadOnlyList<TranscriptEntry> Entries,
-    int InvalidRecords = 0, int UnknownRecords = 0, long Tokens = 0);
+    int InvalidRecords = 0, int UnknownRecords = 0, long Tokens = 0)
+{ public IReadOnlyDictionary<string, TurnInfo> Turns { get; init; } = new Dictionary<string, TurnInfo>(); }
 
 public static class JsonFields
 {

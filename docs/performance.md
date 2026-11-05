@@ -20,9 +20,9 @@ A 10,000-conversation MSTest fixture verifies a 50-row start, distinct automatic
 
 ### Rapid navigation
 
-Local metadata can use a whole prompt as its title. The sidebar and conversation heading use a cached, whitespace-normalized prefix of at most 180 UTF-16 code units plus an ellipsis, without splitting a surrogate pair. Full metadata remains searchable. Native `TextTrimming` alone is insufficient: it can still shape the entire input before clipping it. Folder binding uses a later XAML phase, leaving native scrolling placeholders enabled.
+Local metadata can use a whole prompt as its title. The sidebar and conversation heading use a cached, whitespace-normalized prefix of at most 180 UTF-16 code units plus an ellipsis, without splitting a surrogate pair. Full metadata remains searchable. Native `TextTrimming` alone is insufficient: it can still shape the entire input before clipping it. Only visible and cached rows construct XAML.
 
-Appending a page relies on `KeepItemsInView`; it does not call `ScrollIntoView` or run anchor correction. Insertions, removals and reordering before the viewport retain the existing anchor path. Scroll checks wait for native layout after a collection change rather than calling `UpdateLayout` for every wheel event. This avoids both forced remeasurement during inertia and an underfilled-viewport check against stale extents.
+The sidebar, transcript and work-process contents use `ItemsRepeater` with a virtualizing `StackLayout` inside native `ScrollViewer` controls. Explicit collection and selection automation peers preserve list roles, selection, keyboard navigation and the native Scroll pattern. Other selectors remain native controls. Appending a page relies on native anchoring; it does not call `ScrollIntoView` or run anchor correction. Insertions, removals and reordering before the viewport retain the existing anchor path. Scroll checks wait for native layout after a collection change rather than calling `UpdateLayout` for every wheel event. This avoids both forced remeasurement during inertia and an underfilled-viewport check against stale extents.
 
 Transcript cards retain their already-built content when they load. Shared theme-resource styles avoid repeatedly parsing the same XAML while preserving runtime theme resolution. Icon accessibility normalization coalesces duplicate requests and walks the tree in bounded, low-priority batches. Immutable tool projections cache decoded commands, categories, summaries and file-change parts; local parsing and server page reading prepare them before binding. Inline Markdown matching uses a linear-time regex engine.
 
@@ -34,7 +34,7 @@ Local discovery resolves both `.jsonl` and Codex's `.jsonl.zst` format. A plain 
 
 Zstandard frames written by Codex do not provide arbitrary byte seeks. When a compressed conversation is selected, it is decoded on a background task into a delete-on-close temporary snapshot, then the existing byte-aligned JSONL pager reads bounded pages. This initial decode can take time for very large compressed files; it does not construct the full transcript in memory. At most two decoded snapshots are retained, with a 512 MiB reuse budget (one larger active snapshot may exceed it). Cancellation aborts decoding; original Codex files are never materialized or rewritten. Plain files keep their direct seek path. Database and decompression errors do not become successful empty transcripts.
 
-Paging checks run after wheel and keyboard input even if the viewport is already clamped at the boundary. Native UI Automation scrolling enters through the list's Scroll pattern. Programmatic anchor restoration is not a new navigation gesture and cannot drain server history.
+Pending upward intent is retained while a page is loading and rechecked after collection layout settles. Paging checks run after wheel and keyboard input even if the viewport is already clamped at the boundary. Native UI Automation scrolling enters through the list's Scroll pattern. Programmatic anchor restoration is not a new navigation gesture and cannot drain server history.
 
 ## History worker and snapshot lifetime
 

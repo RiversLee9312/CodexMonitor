@@ -22,6 +22,7 @@ public static class RecordedEvents
         };
         var p = payload.ValueKind == JsonValueKind.Object ? (JsonObject)JsonNode.Parse(payload.GetRawText())! : new JsonObject();
         p["threadId"] = payload.Str("threadId", payload.Str("thread_id", original.Str("threadId", original.Str("conversationId", original.Str("thread_id", payload.Field("thread").Str("id"))))));
+        if (type == "session_configured" && p["threadId"]?.GetValue<string>() is not { Length: > 0 }) p["threadId"] = payload.Str("session_id");
         if (!p.ContainsKey("itemId") && message.Method.StartsWith("codex/event/", StringComparison.Ordinal)) p["itemId"] = payload.Str("item_id", payload.Str("message_id", payload.Str("id", "legacy:" + payload.Str("turn_id"))));
         if (!p.ContainsKey("turnId") && payload.Field("turn_id").ValueKind != JsonValueKind.Undefined) p["turnId"] = payload.Str("turn_id");
         if (method is "turn/started" or "turn/completed" && !p.ContainsKey("turn")) p["turn"] = new JsonObject { ["id"] = payload.Str("turn_id"), ["status"] = type == "turn_aborted" ? "interrupted" : method == "turn/started" ? "inProgress" : "completed" };

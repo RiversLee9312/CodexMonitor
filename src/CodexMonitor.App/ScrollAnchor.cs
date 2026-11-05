@@ -4,12 +4,12 @@ using Microsoft.UI.Xaml.Media;
 
 namespace CodexMonitor.App;
 
-internal sealed record ScrollAnchor(ListView List, object Item, double Y)
+internal sealed record ScrollAnchor(RepeaterList List, object Item, double Y)
 {
-    internal static ScrollAnchor? Capture(ListView list)
+    internal static ScrollAnchor? Capture(RepeaterList list)
     {
-        foreach (var item in list.Items)
-            if (list.ContainerFromItem(item) is FrameworkElement element)
+        foreach (var element in list.RealizedElements)
+            if (element.Content is { } item)
             {
                 var y = element.TransformToVisual(list).TransformPoint(new(0, 0)).Y;
                 if (y + element.ActualHeight > 0 && y < list.ActualHeight) return new(list, item, y);

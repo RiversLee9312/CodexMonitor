@@ -53,8 +53,8 @@ public sealed partial class MainWindow
         var query = CurrentSessionQuery();
         if (reset || query != _sessionQuery) { _sessionLimit = SessionCatalog.PageSize; _resetSessionViewport = true; }
         _sessionQuery = query;
-        var retainedIds = !_resetSessionViewport && SessionList.ItemsPanelRoot is ItemsStackPanel { FirstVisibleIndex: >= 0 } stack
-            ? _visibleSessionRows.Skip(stack.FirstVisibleIndex).Take(Math.Max(1, stack.LastVisibleIndex - stack.FirstVisibleIndex + 1)).Select(row => row.Session.Id).ToArray() : [];
+        var retainedIds = !_resetSessionViewport && SessionList.FirstVisibleIndex is var firstIndex && firstIndex >= 0
+            ? _visibleSessionRows.Skip(firstIndex).Take(Math.Max(1, SessionList.LastVisibleIndex - firstIndex + 1)).Select(row => row.Session.Id).ToArray() : [];
         _sessionQueryCancellation?.Cancel();
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         _sessionQueryCancellation = cancel; var generation = ++_sessionQueryGeneration; var limit = _sessionLimit;

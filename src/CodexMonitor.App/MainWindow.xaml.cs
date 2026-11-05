@@ -111,12 +111,13 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 860));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         MessageList.ItemsSource = _messages;
-        MessageList.ItemContainerTransitions = [];
+        MessageList.Transitions = [];
+        MessageList.LayoutUpdated += (_, _) => { if (_historyAwaitingLayout) { _historyAwaitingLayout = false; QueueEarlierCheck(); } };
         MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
             ++_transcriptViewportInput;
             _jumpingLatest = false; ++_latestScrollGeneration;
-            if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) return;
+            if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) { _earlierRequested = false; return; }
             _following = false;
             for (var node = e.OriginalSource as DependencyObject; node is not null && node != MessageList; node = VisualTreeHelper.GetParent(node))
                 if (node is ScrollViewer inner && inner.VerticalOffset > 160) return;
@@ -127,7 +128,7 @@ public sealed partial class MainWindow : Window
         MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => ++_transcriptViewportInput), true);
         SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
-        SessionList.ItemContainerTransitions = _noSessionTransitions;
+        SessionList.Transitions = _noSessionTransitions;
         _timer = DispatcherQueue.CreateTimer(); _timer.Interval = TimeSpan.FromSeconds(3);
         _timer.Tick += async (_, _) => await RefreshAsync();
         Closed += async (_, _) =>
@@ -326,8 +327,8 @@ public sealed partial class MainWindow : Window
         SessionRow? anchor = null; double anchorY = 0;
         if (!_resetSessionViewport && _pendingSessionAnchor is { } pending && _pendingSessionAnchorInput == inputVersion && _visibleSessionRows.Contains(pending))
         { anchor = pending; anchorY = _pendingSessionAnchorY; }
-        else if (!_resetSessionViewport && SessionList.ItemsPanelRoot is ItemsStackPanel { FirstVisibleIndex: >= 0 } panel && panel.FirstVisibleIndex < _visibleSessionRows.Count && SessionList.ContainerFromIndex(panel.FirstVisibleIndex) is FrameworkElement first)
-        { anchor = _visibleSessionRows[panel.FirstVisibleIndex]; anchorY = first.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y; }
+        else if (!_resetSessionViewport && SessionList.FirstVisibleIndex is var firstIndex && firstIndex >= 0 && firstIndex < _visibleSessionRows.Count && SessionList.ContainerFromIndex(firstIndex) is FrameworkElement first)
+        { anchor = _visibleSessionRows[firstIndex]; anchorY = first.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y; }
         var connected = _client is { IsConnected: true }; var ids = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         var added = sessions.Where(s => !_sessionRows.ContainsKey(s.Id)).ToArray();
         var announceNew = observeAdditions && _sessionBaselineLoaded && added.Length > 0;
@@ -345,7 +346,7 @@ public sealed partial class MainWindow : Window
         _sessionBaselineLoaded = true; _syncing = true;
         try
         {
-            SessionList.ItemContainerTransitions = _noSessionTransitions;
+            SessionList.Transitions = _noSessionTransitions;
             for (int i = _visibleSessionRows.Count - 1; i >= 0; i--) if (!ids.Contains(_visibleSessionRows[i].Session.Id)) _visibleSessionRows.RemoveAt(i);
             for (int i = 0; i < visible.Length; i++)
             {
@@ -376,7 +377,7 @@ public sealed partial class MainWindow : Window
                     if (SessionList.ContainerFromItem(captured) is FrameworkElement current)
                     {
                         var y = current.TransformToVisual(SessionList).TransformPoint(new(0, 0)).Y;
-                        DependencyObject? parent = SessionList.ItemsPanelRoot;
+                        DependencyObject? parent = SessionList.Repeater;
                         while (parent is not null && parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
                         if (parent is ScrollViewer scroll)
                         {
@@ -402,7 +403,7 @@ public sealed partial class MainWindow : Window
     { if (!_syncing) ScheduleSessionQuery(true, args.Reason == AutoSuggestionBoxTextChangeReason.UserInput); }
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e) { if (!_syncing) ScheduleSessionQuery(true); }
     private async void OnRefresh(object sender, RoutedEventArgs e) => await RefreshAsync(true);
-    private async void OnSessionSelected(object sender, SelectionChangedEventArgs e)
+    private async void OnSessionSelected(object sender, EventArgs e)
     {
         if (_syncing || SessionList.SelectedItem is not SessionRow row) return;
         _sessionConnectCancellation?.Cancel();
@@ -489,13 +490,23 @@ public sealed partial class MainWindow : Window
         var query = TranscriptSearch.Text.Trim();
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var viewingId = _selected?.Id;
+        var authority = _historyClient;
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
-            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier);
+            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier,
+            id => authority is null ? _snapshot.Turns.GetValueOrDefault(id) : authority.Models.Details(viewingId!, id),
+            authority is null ? null : async (info, ct) =>
+            {
+                if (!ReferenceEquals(authority, _historyClient) || _selected?.Id != viewingId || !authority.IsConnected) return info;
+                var detail = await authority.ReadTurnInfoAsync(viewingId!, info.Id, info.FirstRecord, ct);
+                if (!ReferenceEquals(authority, _historyClient) || _selected?.Id != viewingId) return info;
+                return detail is null ? info : detail with { FirstRecord = info.FirstRecord, LastRecord = info.LastRecord, LoadedItems = info.LoadedItems, Model = detail.Model ?? info.Model };
+            }, _settings.AutoCollapseWork);
         if (reset) _messages.Clear();
         var anchor = !_following && !reset ? ScrollAnchor.Capture(MessageList) : null;
         var viewportInput = _transcriptViewportInput; var sourceGeneration = _transcriptReadGeneration;
-        for (int i = 0; i < _messages.Count; i++)
-            if (MessageList.ContainerFromIndex(i) is DependencyObject container) TranscriptCard.PreserveScroll(container, _messages[i]);
+        foreach (var container in MessageList.RealizedElements)
+            if (container.Content is EntryRow row) TranscriptCard.PreserveScroll(container, row);
+        if (_messages.Count != rows.Count || !_messages.Select(e => e.Entry.Id).SequenceEqual(rows.Select(e => e.Entry.Id))) _historyAwaitingLayout = true;
         EntryRows.Synchronize(_messages, rows);
         anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -503,6 +514,7 @@ public sealed partial class MainWindow : Window
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             TrackTranscriptScroll();
+            QueueEarlierCheck();
             if (_messageScroll is not null) SetLatestVisible(_readingActivityHistory || !_following && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset >= 24);
         });
     }
@@ -513,8 +525,8 @@ public sealed partial class MainWindow : Window
     }
     private void RequestEarlier()
     {
-        if (!_hasEarlier || _loadingEarlier || _serverRead is not null || _snapshot is null || _messageScroll is { } scroll && scroll.VerticalOffset > Math.Max(200, scroll.ViewportHeight * 2)) return;
-        _following = false; _jumpingLatest = false; ++_latestScrollGeneration; _ = LoadEarlierAsync();
+        if (!_hasEarlier || _snapshot is null) return;
+        _earlierRequested = true; QueueEarlierCheck();
     }
     private async Task LoadEarlierAsync()
     {
@@ -545,7 +557,7 @@ public sealed partial class MainWindow : Window
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException)
         { if (!ct.IsCancellationRequested && generation == _transcriptReadGeneration && _selected?.Id == session.Id) NoticeText("ReadFailed", InfoBarSeverity.Warning); }
-        finally { if (ReferenceEquals(_earlierCancellation, cancellation)) { _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; } }
+        finally { if (ReferenceEquals(_earlierCancellation, cancellation)) { _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; QueueEarlierCheck(); } }
     }
     private LocalTranscriptPager GetLocalPager(string sessionId)
     {
@@ -555,7 +567,7 @@ public sealed partial class MainWindow : Window
     private void RetireLocalPager()
     { if (_localPager is { } old) { _localPager = null; _localPagerSession = null; _ = old.DisposeAsync(); } }
     private void CancelEarlierRead()
-    { _earlierCancellation?.Cancel(); _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
+    { _earlierRequested = false; _historyAwaitingLayout = false; _earlierCancellation?.Cancel(); _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
     private void UpdateTitle()
     {
         SessionTitle.Text = _selected is null ? _text["Transcript"] : new SessionRow(_selected, _text).Title;
@@ -882,6 +894,7 @@ public sealed partial class MainWindow : Window
         if (message.Id is not null) { _ = HandleRequestAsync(client, message); return; }
         message = RecordedEvents.Normalize(message);
         var p = message.Parameters;
+        client.Models.Observe(message.Method, p);
         if (message.Method == "serverRequest/resolved" && _pendingInputs.TryGetValue((client, p.Field("requestId").GetRawText()), out var resolved)) resolved.Cancellation.Cancel();
         if (message.Method is "turn/completed" or "thread/closed" or "thread/reverted")
             foreach (var pending in _pendingInputs.Values.Where(x => x.Request.ThreadId == p.Str("threadId"))) pending.Cancellation.Cancel();
@@ -897,13 +910,13 @@ public sealed partial class MainWindow : Window
         if (_selected is null || !_attached.Contains(_selected.Id) || threadId != _selected.Id && !(threadId.Length == 0 && TranscriptEvents.IsGlobal(message.Method))) return;
         if (_serverRead is { } reading && ReferenceEquals(reading.Client, client) && (reading.SessionId == threadId || threadId.Length == 0))
         { reading.Messages.Add(message); return; }
-        client.Models.Observe(message.Method, p);
         var previous = _snapshot?.Entries ?? Array.Empty<TranscriptEntry>();
         var modelTurn = p.Str("turnId", p.Field("turn").Str("id", _selected.ActiveTurnId ?? ""));
         var entries = TranscriptUpdates.Apply(previous, message.Method, p, DateTimeOffset.Now, client.Models.ForTurn(_selected.Id, modelTurn.Length > 0 ? modelTurn : null), modelTurn);
         var modelItemId = p.Str("itemId", p.Str("item_id", p.Field("item").Str("id")));
         if (modelItemId.Length > 0) client.Models.Remember(_selected.Id, modelItemId, entries.FirstOrDefault(e => e.Id == modelItemId)?.Model);
-        if (!ReferenceEquals(previous, entries)) { _snapshot = _snapshot is null ? new(_selected, entries) : _snapshot with { Session = _selected, Entries = entries }; RenderMessages(); }
+        var contentChanged = !ReferenceEquals(previous, entries);
+        if (contentChanged) _snapshot = _snapshot is null ? new(_selected, entries) : _snapshot with { Session = _selected, Entries = entries };
         switch (message.Method)
         {
             case "turn/started":
@@ -914,6 +927,7 @@ public sealed partial class MainWindow : Window
                 var state = CodexClient.ParseState(p.Field("status"));
                 _selected = _selected with { State = state, IsLive = state != SessionState.Unknown, ActiveTurnId = state is SessionState.Active or SessionState.Waiting ? _selected.ActiveTurnId : null }; break;
         }
+        if (contentChanged || message.Method is "turn/started" or "turn/completed" or "model/rerouted" or "thread/settings/updated" or "thread/tokenUsage/updated" or "response.created" or "thread/status/changed") RenderMessages();
         UpdateTitle(); UpdateChrome();
     }
     private void UpdateSessionActivity(RpcMessage message)
@@ -1003,12 +1017,14 @@ public sealed partial class MainWindow : Window
     }
     private void OnTranscriptViewChanged(object? sender, ScrollViewerViewChangedEventArgs args)
     {
-        if (args.IsIntermediate) { ++_transcriptViewportInput; return; }
-        if (_messageScroll is null || _jumpingLatest) return;
+        if (_messageScroll is null) return;
+        var up = _messageScroll.VerticalOffset < _previousTranscriptOffset;
+        _previousTranscriptOffset = _messageScroll.VerticalOffset;
+        if (args.IsIntermediate) ++_transcriptViewportInput;
+        if (_jumpingLatest) return;
         _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
         SetLatestVisible(!_following);
-        if (_messageScroll.VerticalOffset < _previousTranscriptOffset && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
-        _previousTranscriptOffset = _messageScroll.VerticalOffset;
+        if (up && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
     }
     private void SetLatestVisible(bool visible)
     {
@@ -1214,13 +1230,19 @@ public sealed partial class MainWindow : Window
         };
         var theme = new ComboBox { Header = _text["Theme"], HorizontalAlignment = HorizontalAlignment.Stretch };
         var themes = new[] { "System", "Light", "Dark" }; foreach (var key in themes) theme.Items.Add(_text[key]); theme.SelectedIndex = Math.Max(0, Array.IndexOf(themes, _settings.Theme));
+        var autoCollapse = new ToggleSwitch { Header = _text["AutoCollapseWork"], IsOn = _settings.AutoCollapseWork };
+        AutomationProperties.SetAutomationId(autoCollapse, "AutoCollapseWork");
+        AutomationProperties.SetName(autoCollapse, _text["AutoCollapseWork"]);
+        AutomationProperties.SetHelpText(autoCollapse, _text["AutoCollapseWorkHelp"]);
+        var collapseHelp = new TextBlock { Text = _text["AutoCollapseWorkHelp"], TextWrapping = TextWrapping.Wrap, FontSize = 13 };
+        collapseHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         var language = new ComboBox { Header = _text["Language"], HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(mode, _text["Connection"]); AutomationProperties.SetName(theme, _text["Theme"]); AutomationProperties.SetName(language, _text["Language"]);
         var languages = new[] { "" }.Concat(LocalizationService.AvailableLanguages).ToArray();
         foreach (var tag in languages) language.Items.Add(tag.Length == 0 ? _text["System"] : CultureInfo.GetCultureInfo(tag).NativeName);
         language.SelectedIndex = Math.Max(0, Array.IndexOf(languages, _settings.Language));
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed }; error.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
-        foreach (var item in new FrameworkElement[] { mode, discovery, new TextBlock { Text = _text["ConnectionHelp"], TextWrapping = TextWrapping.Wrap }, home, exe, theme, language, new TextBlock { Text = _text["PrivacyNote"], TextWrapping = TextWrapping.Wrap, FontSize = 12 }, error }) panel.Children.Add(item);
+        foreach (var item in new FrameworkElement[] { mode, discovery, new TextBlock { Text = _text["ConnectionHelp"], TextWrapping = TextWrapping.Wrap }, home, exe, theme, language, autoCollapse, collapseHelp, new TextBlock { Text = _text["PrivacyNote"], TextWrapping = TextWrapping.Wrap, FontSize = 12 }, error }) panel.Children.Add(item);
         var dialog = new ContentDialog { Title = _text["Settings"], Content = new ScrollViewer { Content = panel, MaxHeight = 530 }, PrimaryButtonText = _text["Save"], CloseButtonText = _text["Cancel"], DefaultButton = ContentDialogButton.Primary };
         var settingsContent = dialog.Content; var showingLicenses = false; double settingsOffset = 0;
         var licenses = new Button { Content = _text["OpenSourceLicenses"], HorizontalAlignment = HorizontalAlignment.Left };
@@ -1250,7 +1272,7 @@ public sealed partial class MainWindow : Window
         };
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         var changedConnection = home.Home != _settings.CodexHome || exe.Executable != _settings.Executable || discovery.Endpoint != _settings.Endpoint || (mode.SelectedIndex == 1) != _settings.UseSharedServer;
-        _settings = _settings with { CodexHome = Path.GetFullPath(home.Home), Executable = exe.Executable, UseSharedServer = mode.SelectedIndex == 1, Endpoint = discovery.Endpoint, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex] };
+        _settings = _settings with { CodexHome = Path.GetFullPath(home.Home), Executable = exe.Executable, UseSharedServer = mode.SelectedIndex == 1, Endpoint = discovery.Endpoint, Theme = themes[theme.SelectedIndex], Language = languages[language.SelectedIndex], AutoCollapseWork = autoCollapse.IsOn };
         try { await _settings.SaveAsync(); }
         catch (IOException) { NoticeText("ReadFailed", InfoBarSeverity.Error); return; }
         _store = new(_settings.CodexHome, Path.Combine(Path.GetDirectoryName(AppSettings.SettingsPath)!, "session-index.json")); _sessionCatalog = null; _knownLocalSessionIds = null; _text = new(_settings.Language);

@@ -28,7 +28,7 @@ public sealed partial class MainWindow
         _reviewFontOverrides.Clear();
         if (_client is not null) { await _client.DisposeAsync(); _client = null; }
         _syncing = true;
-        SessionList.ItemContainerTransitions = _noSessionTransitions;
+        SessionList.Transitions = _noSessionTransitions;
         _visibleSessionRows.Clear(); _sessionRows.Clear(); _sessionOrder.Clear(); _sessionBaselineLoaded = false;
         _syncing = false;
         _settings = new AppSettings { CodexHome = "C:\\Users\\Example\\.codex", Theme = theme, Language = language };
@@ -131,7 +131,7 @@ public sealed partial class MainWindow
         _resolveExecutable = _ => throw new InvalidOperationException("A changed active session must not start another CLI server");
     }
     internal Task ResumeSessionReviewAsync() => ResumeAsync();
-    internal bool ReviewWaitAnimating => FindVisual<ProgressRing>(MessageList) is { IsActive: true };
+    internal bool ReviewWaitAnimating => Descendants(MessageList).OfType<ProgressRing>().Any(r => r.IsActive && Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(r) == _text["ToolWaiting"]);
     internal string ReviewNotice => Notice.Message;
     internal void ConfigureSessionConnectionReview(ISessionServerLocator locator, Func<SessionServerMatch, CancellationToken, Task<CodexClient>> open)
     { _sessionServerLocator = locator; _openSessionServer = open; }
@@ -219,7 +219,7 @@ public sealed partial class MainWindow
             _following = false; RenderMessages(true); await SettleAsync();
         }
         else { _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("activity-new", EntryKind.Tool, "echo new", DateTimeOffset.Now, Tool: new("shell", "echo new", "OK", ToolActivityState.Completed))).ToArray() }; RenderMessages(); await SettleAsync(); }
-        var group = FindVisual<ListView>(MessageList) ?? throw new InvalidOperationException("Activity list not realized");
+        var group = FindVisual<RepeaterList>(MessageList) ?? throw new InvalidOperationException("Activity list not realized");
         var scroll = FindVisual<ScrollViewer>(group)!;
         if (!update) { scroll.ChangeView(null, 700, null, true); await SettleAsync(); }
         return scroll.VerticalOffset;
@@ -227,21 +227,22 @@ public sealed partial class MainWindow
     internal async Task<(double Before, double After, bool Paused, bool SameList)> NewReplyWhileReadingActivityReviewAsync()
     {
         var before = await ActivityScrollReviewAsync(false);
-        var group = FindVisual<ListView>(MessageList)!; _following = true;
+        var group = FindVisual<RepeaterList>(MessageList)!; _following = true;
         _messages[0].HistoryChanged?.Invoke(true);
         _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("reply-new", EntryKind.Assistant, "A new reply arrived.", DateTimeOffset.Now)).ToArray() };
         RenderMessages(); await SettleAsync();
-        var current = FindVisual<ListView>(MessageList)!;
+        var current = FindVisual<RepeaterList>(MessageList)!;
         return (before, FindVisual<ScrollViewer>(current)!.VerticalOffset, !_following && LatestButton.Visibility == Visibility.Visible, ReferenceEquals(group, current));
     }
     internal async Task<bool> ActivityAtEndFollowsNewItemsReviewAsync()
     {
         await ActivityScrollReviewAsync(false); _following = true;
-        var group = FindVisual<ListView>(MessageList)!; var scroll = FindVisual<ScrollViewer>(group)!;
+        var group = FindVisual<RepeaterList>(MessageList)!; var scroll = FindVisual<ScrollViewer>(group)!;
         scroll.ChangeView(null, scroll.ScrollableHeight, null, true); await SettleAsync();
         await ActivityScrollReviewAsync(true); await SettleAsync();
         return scroll.ScrollableHeight - scroll.VerticalOffset < 2;
     }
+    internal void ReviewAutoCollapse(bool value) { _settings = _settings with { AutoCollapseWork = value }; RenderMessages(); }
     internal bool ReviewNativeHighContrast => _themeSettings.HighContrast;
     internal void ReviewTranscriptFile(string path) { _selected = _selected! with { FilePath = path }; }
     internal void ReviewLocalReader(Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> reader) => _readLocalTranscript = reader;
@@ -249,7 +250,19 @@ public sealed partial class MainWindow
     internal void ReviewUsePaging() { _pagedReview = true; _following = true; }
     internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
     internal bool ReviewHasEarlier => _hasEarlier;
-    internal bool ReviewLoadingEarlier => _loadingEarlier;
+    internal bool ReviewLoadingEarlier => _loadingEarlier || _earlierRequested && _earlierCheckQueued;
+    internal void ReviewQueueEarlier() => RequestEarlier();
+    internal void ReviewTurnMetadata(params TurnInfo[] turns) { _snapshot = _snapshot! with { Turns = turns.ToDictionary(t => t.Id) }; RenderMessages(); }
+    internal async Task<Flyout> ReviewOpenTurnInfoAsync()
+    {
+        var entry = new TranscriptEntry("turn-info-message", EntryKind.Assistant, "A completed response.", DateTimeOffset.Now.AddDays(-1), TurnId: "turn-info", Model: "example-model");
+        await ShowConversationPresentationReviewAsync(new[] { entry }, false);
+        ReviewTurnMetadata(new TurnInfo("turn-info") { Model = "example-model", Status = "completed", StartedAt = entry.Timestamp.AddMinutes(-1), CompletedAt = entry.Timestamp,
+            LastRequest = new(120, 40, 0, 30, 10, 150), ThreadTotal = new(1000, 600, 0, 300, 90, 1300), ContextWindow = 200000 });
+        await SettleAsync();
+        var button = ReviewVisualElements<Button>().Single(b => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(b) == "TurnInfo-turn-info");
+        var flyout = (Flyout)button.Flyout; flyout.ShowAt(button); await SettleAsync(); return flyout;
+    }
     internal Task ReviewLoadEarlierAsync() => LoadEarlierAsync();
     internal string ReviewHistoryState => $"loaded={ReviewLoadedCount}, earlier={_hasEarlier}, loading={_loadingEarlier}, offset={_messageScroll?.VerticalOffset}, start={_historyStart}, latest={_jumpingLatest}, notice={(Notice.IsOpen ? Notice.Message : "")}";
     internal async Task<(object Item, double Y)> ReviewScrollToEarlierAsync()
@@ -261,9 +274,9 @@ public sealed partial class MainWindow
         RequestEarlier(); return (anchor.Item, anchor.Y);
     }
     internal double ReviewItemY(object item) => ((FrameworkElement)MessageList.ContainerFromItem(item)).TransformToVisual(MessageList).TransformPoint(new(0, 0)).Y;
-    internal async Task<(ListView List, object Item, double Y)> ReviewScrollToolHistoryAsync()
+    internal async Task<(RepeaterList List, object Item, double Y)> ReviewScrollToolHistoryAsync()
     {
-        var group = FindVisual<ListView>(MessageList)!; var scroll = ScrollAnchor.FindScroll(group)!;
+        var group = FindVisual<RepeaterList>(MessageList)!; var scroll = ScrollAnchor.FindScroll(group)!;
         _loadingEarlier = true; _following = false; scroll.ChangeView(null, 150, null, true); await SettleAsync();
         var anchor = ScrollAnchor.Capture(group)!; _loadingEarlier = false; RequestEarlier(); return (group, anchor.Item, anchor.Y);
     }
@@ -301,10 +314,10 @@ public sealed partial class MainWindow
         RenderMessages(true); await SettleAsync();
         ScrollViewer Output() => Descendants(MessageList).OfType<ScrollViewer>().First(s => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(s) == _text["ToolOutput"]);
         var scroll = Output(); scroll.ChangeView(null, 180, null, true); await SettleAsync(); var before = scroll.VerticalOffset;
-        Descendants(MessageList).OfType<ActivityDisclosure>().First().Focus(FocusState.Keyboard);
+        Descendants(MessageList).OfType<ActivityDisclosure>().Single(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t) == "ActivityToggle-stream-output").Focus(FocusState.Keyboard);
         _snapshot = new(_selected!, [entry with { Tool = entry.Tool! with { Output = entry.Tool.Output + "\nMore output arrived." } }]);
         RenderMessages(); await SettleAsync();
-        var disclosure = Descendants(MessageList).OfType<ActivityDisclosure>().First();
+        var disclosure = Descendants(MessageList).OfType<ActivityDisclosure>().Single(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t) == "ActivityToggle-stream-output");
         return (before, Output().VerticalOffset, disclosure.IsExpanded, AccessibilitySupport.ContainsFocus(disclosure));
     }
     internal async Task ShowActivityReviewAsync(bool expand = false)
@@ -335,7 +348,7 @@ public sealed partial class MainWindow
     internal System.Collections.ObjectModel.ObservableCollection<SessionRow> ReviewSessionRows => _visibleSessionRows;
     internal bool ReviewSessionsLoading => _sessionQueryCancellation is not null;
     internal int ReviewSessionRowModels => _sessionRows.Count;
-    internal string ReviewPagingState => $"Rows={_visibleSessionRows.Count}, offset={_sessionScroll?.VerticalOffset}, extent={_sessionScroll?.ExtentHeight}, pending={_pendingSessionAnchor?.Session.Id}, restoring={_restoringSessionAnchor}, input={_sessionAnchorInputVersion}, intents={_sessionPageIntent}/{_sessionConsumedPageIntent}, limit={_sessionLimit}, visible={(SessionList.ItemsPanelRoot as ItemsStackPanel)?.FirstVisibleIndex}";
+    internal string ReviewPagingState => $"Rows={_visibleSessionRows.Count}, offset={_sessionScroll?.VerticalOffset}, extent={_sessionScroll?.ExtentHeight}, pending={_pendingSessionAnchor?.Session.Id}, restoring={_restoringSessionAnchor}, input={_sessionAnchorInputVersion}, intents={_sessionPageIntent}/{_sessionConsumedPageIntent}, limit={_sessionLimit}, visible={SessionList.FirstVisibleIndex}";
     internal async Task ReviewSessionCatalogAsync(IReadOnlyList<SessionInfo> local, Func<bool, string?, CancellationToken, Task<SessionPage>>? remote = null)
     {
         _sessionQueryCancellation?.Cancel(); _sessionQueryCancellation = null; _sessionEventClient = null; _sessionCatalogBaseline = true; _localSessionSnapshot = Array.Empty<SessionInfo>(); _sessionPageIntent = _sessionConsumedPageIntent = 0; ++_sessionQueryGeneration; _sessionCatalogClient = _client;
@@ -380,7 +393,7 @@ public sealed partial class MainWindow
     internal void ReviewCloseDateFilter() => _sessionDateFlyout?.Hide();
     internal object ReviewSessionSource => SessionList.ItemsSource;
     internal object ReviewSelectedRow => SessionList.SelectedItem;
-    internal int ReviewListTransitions => SessionList.ItemContainerTransitions.Count;
+    internal int ReviewListTransitions => SessionList.Transitions.Count;
     internal void ApplySessionReviewSnapshot(params SessionInfo[] sessions) { _sessions = sessions; ApplyFilter(true); }
     internal void ReadReviewSession(string id)
     {

@@ -13,6 +13,8 @@ public partial class TestApp : Application
         UnhandledException += (_, args) =>
         {
             var path = Environment.GetEnvironmentVariable("CODEX_MONITOR_MANUAL_STATE");
+            System.Diagnostics.Trace.WriteLine(args.Exception);
+            if (string.IsNullOrEmpty(path)) path = Path.Combine(Path.GetTempPath(), "CodexMonitor-ui-exception");
             if (!string.IsNullOrEmpty(path)) File.AppendAllText(path + ".error", args.Exception.ToString());
         };
     }
@@ -27,15 +29,22 @@ public partial class TestApp : Application
             await CodexMonitor.App.MainWindow.SettleAsync();
             await ReviewWindow.SetReviewAsync(1180, 800, "Dark", "zh-CN");
             var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-wheel-" + Guid.NewGuid() + ".jsonl");
-            await File.WriteAllLinesAsync(path, Enumerable.Range(0, 120).Select(i => System.Text.Json.JsonSerializer.Serialize(new
-            { type = "event_msg", timestamp = DateTimeOffset.UtcNow, payload = new { type = "agent_message", message = "Response " + i + "\n\n" + string.Concat(Enumerable.Repeat("Selectable **message** with `code` and a [link](https://example.com).\n", 30)) } })));
+            await File.WriteAllLinesAsync(path, Enumerable.Range(0, 2400).Select(i => System.Text.Json.JsonSerializer.Serialize(new
+            { type = "event_msg", timestamp = DateTimeOffset.UtcNow, payload = new { type = "agent_message", message = "Response " + i + "\n\n" + string.Concat(Enumerable.Repeat("Selectable **message** with `code` and a [link](https://example.com).\n", 2)) } })));
+            ReviewWindow.ReviewUsePaging();
+            var workPath = path + ".work.jsonl";
+            await File.WriteAllLinesAsync(workPath, Enumerable.Range(0, 1800).Select(i => System.Text.Json.JsonSerializer.Serialize(new { type = "response_item", timestamp = DateTimeOffset.UtcNow, payload = new { type = "function_call", name = "exec_command", call_id = "work-" + i, arguments = "{\"cmd\":\"echo " + i + "\"}" } })));
+            await using (var outputFile = File.Create(workPath + ".zst"))
+            await using (var encoder = new ZstdSharp.CompressionStream(outputFile))
+            await using (var inputFile = File.OpenRead(workPath)) await inputFile.CopyToAsync(encoder);
+            File.Delete(workPath);
             var prompt = string.Concat(Enumerable.Repeat("## Task\n请检查实现、注释和测试。 Preserve state and reject stale results.\n", 4100));
             var clock = System.Diagnostics.Stopwatch.StartNew(); double previous = 0, maxGap = 0; int beats = 0;
             _reviewTimer = ReviewWindow.DispatcherQueue.CreateTimer(); _reviewTimer.Interval = TimeSpan.FromMilliseconds(16);
             _reviewTimer.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; maxGap = Math.Max(maxGap, now - previous); previous = now; beats++; };
             _reviewTimer.Start();
             await ReviewWindow.ReviewSessionCatalogAsync(Enumerable.Range(0, 1000).Select(i => new CodexMonitor.Core.SessionInfo
-            { Id = "wheel-" + i, Title = "Conversation " + i + (i % 3 == 0 ? "\n" + prompt : ""), FilePath = path, State = CodexMonitor.Core.SessionState.Completed, CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i) }).ToArray());
+            { Id = "wheel-" + i, Title = "Conversation " + i + (i % 3 == 0 ? "\n" + prompt : ""), FilePath = i == 1 ? workPath + ".zst" : path, State = CodexMonitor.Core.SessionState.Completed, CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i) }).ToArray());
             var output = Environment.GetEnvironmentVariable("CODEX_MONITOR_MANUAL_STATE");
             var telemetry = ReviewWindow.DispatcherQueue.CreateTimer(); telemetry.Interval = TimeSpan.FromMilliseconds(250); bool writing = false;
             telemetry.Tick += async (_, _) =>
@@ -45,13 +54,13 @@ public partial class TestApp : Application
                 try
                 {
                     var state = System.Text.Json.JsonSerializer.Serialize(new { MaxDispatcherGapMs = maxGap, Beats = beats, Rows = ReviewWindow.ReviewSessionRows.Count,
-                        Selected = (ReviewWindow.ReviewSelectedRow as CodexMonitor.App.SessionRow)?.Session.Id, Loading = ReviewWindow.ReviewTranscriptLoading, Messages = ReviewWindow.ReviewMessageRows.Count });
+                        Selected = (ReviewWindow.ReviewSelectedRow as CodexMonitor.App.SessionRow)?.Session.Id, Loading = ReviewWindow.ReviewTranscriptLoading, Messages = ReviewWindow.ReviewMessageRows.Count, Loaded = ReviewWindow.ReviewLoadedCount, Earlier = ReviewWindow.ReviewHasEarlier, History = ReviewWindow.ReviewHistoryState, Realized = ReviewWindow.ReviewVisualElements<CodexMonitor.App.RepeaterList>().Select(l => l.RealizedElements.Count()).ToArray() });
                     await Task.Run(() => File.WriteAllTextAsync(output, state));
                 }
                 finally { writing = false; }
             };
             telemetry.Start();
-            ReviewWindow.Closed += (_, _) => { _reviewTimer.Stop(); telemetry.Stop(); File.Delete(path); };
+            ReviewWindow.Closed += (_, _) => { _reviewTimer.Stop(); telemetry.Stop(); File.Delete(path); File.Delete(workPath + ".zst"); };
             return;
         }
         if (Environment.GetCommandLineArgs().Any(a => a is "--manual-review" or "--manual-review-sessions"))

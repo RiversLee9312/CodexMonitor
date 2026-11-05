@@ -18,17 +18,19 @@ public sealed class AccessibilityTests
 {
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod]
-    [DataRow("Light", "zh-CN", false, false, false, false)]
-    [DataRow("Dark", "de-DE", false, false, false, false)]
-    [DataRow("Dark", "ar-SA", false, false, false, false)]
-    [DataRow("Dark", "zh-CN", true, false, false, false)]
-    [DataRow("Light", "zh-CN", false, true, false, false)]
-    [DataRow("Light", "zh-CN", false, false, true, false)]
-    [DataRow("Dark", "ar-SA", false, false, true, false)]
-    [DataRow("Light", "zh-CN", false, false, false, true)]
-    [DataRow("Dark", "de-DE", false, false, false, true)]
-    [DataRow("Dark", "ar-SA", false, false, false, true)]
-    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses, bool serverStatus, bool question, bool dates)
+    [DataRow("Light", "zh-CN", false, false, false, false, false)]
+    [DataRow("Dark", "de-DE", false, false, false, false, false)]
+    [DataRow("Dark", "ar-SA", false, false, false, false, false)]
+    [DataRow("Dark", "zh-CN", true, false, false, false, false)]
+    [DataRow("Light", "zh-CN", false, true, false, false, false)]
+    [DataRow("Light", "zh-CN", false, false, true, false, false)]
+    [DataRow("Dark", "ar-SA", false, false, true, false, false)]
+    [DataRow("Light", "zh-CN", false, false, false, true, false)]
+    [DataRow("Dark", "de-DE", false, false, false, true, false)]
+    [DataRow("Dark", "ar-SA", false, false, false, true, false)]
+    [DataRow("Light", "zh-CN", false, false, false, false, true)]
+    [DataRow("Dark", "ar-SA", false, false, false, false, true)]
+    public async Task AxeWindowsFindsNoAccessibilityErrorsInTheProductionView(string theme, string language, bool licenses, bool serverStatus, bool question, bool dates, bool turnDetails)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, theme, language); await window.ShowActivityReviewAsync(true);
         ContentDialog? licenseDialog = null;
@@ -63,6 +65,7 @@ public sealed class AccessibilityTests
             await MainWindow.SettleAsync(); dateSurface = panel;
             while (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(dateSurface) is FrameworkElement parent) { dateSurface = parent; if (dateSurface is FlyoutPresenter) break; }
         }
+        Flyout? turnFlyout = turnDetails ? await window.ReviewOpenTurnInfoAsync() : null;
         try
         {
             var directory = Path.GetFullPath(Path.Combine(MainWindow.ScreenshotDirectory, "..", "accessibility")); Directory.CreateDirectory(directory);
@@ -70,10 +73,10 @@ public sealed class AccessibilityTests
             var repo = new DirectoryInfo(AppContext.BaseDirectory);
             while (repo is not null && !File.Exists(Path.Combine(repo.FullName, "CodexMonitor.sln"))) repo = repo.Parent;
             Assert.IsNotNull(repo);
-            var scanId = $"view-{theme}-{language}" + (dates ? "-dates" : question ? "-question" : licenses ? "-licenses" : serverStatus ? "-server-status" : "");
+            var scanId = $"view-{theme}-{language}" + (turnDetails ? "-turn-info" : dates ? "-dates" : question ? "-question" : licenses ? "-licenses" : serverStatus ? "-server-status" : "");
             // Flyouts are separate native popup surfaces; RenderTargetBitmap cannot capture their presenter.
             // Axe.Windows stores native screenshots for all scanned popup roots in its .a11ytest files.
-            if (!dates) TestContext.AddResultFile(await window.CaptureReviewAsync(scanId, statusDialog ?? licenseDialog));
+            if (!dates && !turnDetails) TestContext.AddResultFile(await window.CaptureReviewAsync(scanId, statusDialog ?? licenseDialog));
             var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var arg in new[] { "run", "--project", Path.Combine(repo.FullName, "tests", "CodexMonitor.Accessibility"), "--", Environment.ProcessId.ToString(), handle.ToInt64().ToString(), directory, scanId }) start.ArgumentList.Add(arg);
             using var scanner = Process.Start(start)!;
@@ -93,6 +96,7 @@ public sealed class AccessibilityTests
         }
         finally
         {
+            turnFlyout?.Hide();
             if (dates) window.ReviewCloseDateFilter();
             if (licenseDialog is not null) { licenseDialog.Hide(); await licenseClosing!; }
             if (statusDialog is not null) { statusDialog.Hide(); await statusClosing!; }

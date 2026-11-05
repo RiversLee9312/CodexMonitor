@@ -28,6 +28,7 @@ public sealed class TranscriptParser
         var legacyTools = new Dictionary<string, int>();
         int invalid = 0, unknown = 0, ordinal = 0;
         long tokens = 0;
+        var turns = new ModelTimeline();
         string? turnId = null; // A page may start in an older turn: never stamp it with the current turn.
         string? contextTurn = null, contextModel = null;
         TranscriptEntry Stamp(TranscriptEntry e) => e with { TurnId = e.TurnId ?? turnId ?? contextTurn, Model = e.Model ?? contextModel };
@@ -59,6 +60,7 @@ public sealed class TranscriptParser
                     case "turn_context":
                         session = session with { Model = payload.Str("model", session.Model) };
                         contextTurn = payload.Str("turn_id", payload.Str("id", turnId ?? "")); contextModel = payload.Str("model") is { Length: > 0 } model ? model : null;
+                        turns.Record(session.Id, contextTurn, old => old with { Model = contextModel ?? old.Model, ModelSource = "ModelRecorded", Effort = payload.Str("effort", payload.Str("reasoning_effort", old.Effort ?? "")) });
                         break;
                     case "response_item":
                         var entry = ParseResponseItem(payload, id, time) is { } parsed ? Stamp(parsed with { Model = payload.Str("model") is { Length: > 0 } itemModel ? itemModel : parsed.Model }) : null;
@@ -87,13 +89,17 @@ public sealed class TranscriptParser
                                 turnId = payload.Str("turn_id");
                                 if (contextTurn != turnId) contextModel = payload.Str("model") is { Length: > 0 } startedModel ? startedModel : null;
                                 contextTurn = turnId;
+                                turns.Record(session.Id, turnId, old => old with { Model = contextModel, Status = "inProgress", StartedAt = time == default ? old.StartedAt : time });
                                 break;
                             case "task_complete": case "turn_complete":
+                                turns.Record(session.Id, payload.Str("turn_id", turnId ?? contextTurn ?? ""), old => old with { Status = "completed", CompletedAt = time == default ? old.CompletedAt : time });
                                 state = SessionState.Completed; turnId = null; break;
                             case "turn_aborted": case "task_interrupted":
+                                turns.Record(session.Id, payload.Str("turn_id", turnId ?? contextTurn ?? ""), old => old with { Status = "interrupted", CompletedAt = time == default ? old.CompletedAt : time });
                                 state = SessionState.Interrupted; turnId = null; break;
                             case "model_rerouted":
                                 contextModel = payload.Str("toModel", payload.Str("to_model", contextModel ?? ""));
+                                turns.Record(session.Id, payload.Str("turn_id", turnId ?? contextTurn ?? ""), old => old with { Model = contextModel, ModelSource = "ModelRerouted" });
                                 var routed = new JsonObject { ["threadId"] = session.Id, ["turnId"] = turnId ?? contextTurn, ["fromModel"] = payload.Str("fromModel", payload.Str("from_model")), ["toModel"] = contextModel };
                                 using (var route = JsonDocument.Parse(routed.ToJsonString())) entries.Add(Stamp(TranscriptEvents.Parse("model/rerouted", route.RootElement, time)! with { Id = id }));
                                 break;
@@ -107,6 +113,9 @@ public sealed class TranscriptParser
                             case "token_count":
                                 var usage = payload.Field("info").Field("total_token_usage").Field("total_tokens");
                                 if (usage.TryNumber(out var count)) tokens = count;
+                                var info = payload.Field("info");
+                                turns.Record(session.Id, payload.Str("turn_id", turnId ?? contextTurn ?? ""), old => old with { LastRequest = TokenBreakdown.Parse(info.Field("last_token_usage")), ThreadTotal = TokenBreakdown.Parse(info.Field("total_token_usage")),
+                                    ContextWindow = info.Field("model_context_window").TryNumber(out var context) ? context : old.ContextWindow });
                                 break;
                             case "item_completed":
                                 var native = TranscriptItemAdapter.Parse(payload.Field("item"), time, ToolActivityState.Completed);
@@ -215,7 +224,7 @@ public sealed class TranscriptParser
         }
         session = session with { State = state, ActiveTurnId = turnId ?? (startOffset > 0 && state is SessionState.RecordedActive or SessionState.Active or SessionState.Waiting ? session.ActiveTurnId : null) };
         foreach (var entry in entries) { ct.ThrowIfCancellationRequested(); entry.Tool?.PreparePresentation(); }
-        return new(session, entries.OrderBy(e => e.Timestamp).ToArray(), invalid, unknown, tokens);
+        return new(session, entries.OrderBy(e => e.Timestamp).ToArray(), invalid, unknown, tokens) { Turns = turns.Details(session.Id) };
     }
     private static string MirrorKey(TranscriptEntry entry)
     {
