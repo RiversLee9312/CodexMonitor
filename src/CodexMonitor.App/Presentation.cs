@@ -378,7 +378,7 @@ public sealed partial class TranscriptCard : UserControl
         var list = new RepeaterList { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
             Transitions = [], ItemsSource = new ObservableCollection<EntryRow>(row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive, scrollOffsets: row.ScrollOffsets, historyChanged: row.HistoryChanged, canFollow: row.CanFollow))) };
-        list.Repeater.Layout = new WorkProcessLayout(list);
+        list.Repeater.Layout = new ViewportStackLayout(list);
         list.Scroll.ViewChanged += (_, _) => list.Repeater.InvalidateMeasure();
         ScrollViewer.SetIsVerticalScrollChainingEnabled(list, true);
         var userScrolling = false;

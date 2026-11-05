@@ -5,7 +5,7 @@ using Windows.Foundation;
 namespace CodexMonitor.App;
 
 /// <summary>A bounded, variable-height virtual layout in the inner scroller's coordinate space.</summary>
-internal sealed partial class WorkProcessLayout(RepeaterList owner) : VirtualizingLayout
+internal sealed partial class ViewportStackLayout(RepeaterList owner, double estimatedHeight = 40) : VirtualizingLayout
 {
     private readonly Dictionary<string, double> _measured = new(StringComparer.Ordinal);
     private readonly Dictionary<int, UIElement> _elements = [];
@@ -22,7 +22,7 @@ internal sealed partial class WorkProcessLayout(RepeaterList owner) : Virtualizi
         if (_dirty || _keys.Length != context.ItemCount)
         {
             _keys = new string[context.ItemCount]; var values = new double[context.ItemCount];
-            for (int i = 0; i < context.ItemCount; i++) { _keys[i] = owner.ItemKey(i); values[i] = _measured.GetValueOrDefault(_keys[i], 40); }
+            for (int i = 0; i < context.ItemCount; i++) { _keys[i] = owner.ItemKey(i); values[i] = _measured.GetValueOrDefault(_keys[i], estimatedHeight); }
             _heights.Reset(values); _dirty = false;
             if (_measured.Count > context.ItemCount * 2 + 100) { var current = _keys.ToHashSet(StringComparer.Ordinal); foreach (var key in _measured.Keys.Where(k => !current.Contains(k)).ToArray()) _measured.Remove(key); }
         }

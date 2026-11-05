@@ -17,7 +17,7 @@ public sealed class WorkProcessUiTests
     {
         var random = new Random(7391);
         var values = Enumerable.Range(0, 1800).Select(_ => 40d + random.Next(250)).ToArray();
-        var index = new WorkProcessLayout.HeightIndex(); index.Reset(values.ToArray());
+        var index = new ViewportStackLayout.HeightIndex(); index.Reset(values.ToArray());
         for (int update = 0; update < 250; update++)
         {
             var changed = random.Next(values.Length); values[changed] = 40 + random.Next(400); index.Set(changed, values[changed]);

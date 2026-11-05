@@ -287,6 +287,7 @@ public sealed partial class MainWindow
         RequestEarlier(); return (anchor.Item, anchor.Y);
     }
     internal double ReviewItemY(object item) => ((FrameworkElement)MessageList.ContainerFromItem(item)).TransformToVisual(MessageList).TransformPoint(new(0, 0)).Y;
+    internal double ReviewFirstMessageY => ScrollAnchor.Capture(MessageList)?.Y ?? double.PositiveInfinity;
     internal async Task<(RepeaterList List, object Item, double Y)> ReviewScrollToolHistoryAsync()
     {
         var group = FindVisual<RepeaterList>(MessageList)!; var scroll = ScrollAnchor.FindScroll(group)!;

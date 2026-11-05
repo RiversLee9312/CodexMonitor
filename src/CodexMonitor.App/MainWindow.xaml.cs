@@ -112,6 +112,8 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 860));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         MessageList.ItemsSource = _messages;
+        MessageList.Repeater.Layout = new ViewportStackLayout(MessageList, 180);
+        MessageList.Scroll.ViewChanged += (_, _) => MessageList.Repeater.InvalidateMeasure();
         MessageList.NavigationRequested += forward =>
         {
             _transcriptScrollingFromInput = true;
@@ -525,7 +527,7 @@ public sealed partial class MainWindow : Window
             if (container.Content is EntryRow row) TranscriptCard.PreserveScroll(container, row);
         if (_messages.Count != rows.Count || !_messages.Select(e => e.Entry.Id).SequenceEqual(rows.Select(e => e.Entry.Id))) _historyAwaitingLayout = true;
         var restoring = MessageList.BeginRestoration();
-        EntryRows.Synchronize(_messages, rows);
+        using (MessageList.DeferUpdates()) EntryRows.Synchronize(_messages, rows);
         MessageList.EndRestoration(restoring);
         anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
