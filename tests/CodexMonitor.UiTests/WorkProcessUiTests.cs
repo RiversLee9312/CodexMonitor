@@ -26,6 +26,7 @@ public sealed class WorkProcessUiTests
             var previous = window.ReviewVisualElements<ActivityGroupView>().Single().List;
             card.Row = EntryRow.Project(entries, text, [], canFollow: () => true).Single(); await MainWindow.SettleAsync();
             var current = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            for (int i = 0; i < 80 && current.Scroll.ScrollableHeight - current.Scroll.VerticalOffset >= 2; i++) await Task.Delay(25);
             Assert.AreNotSame(previous, current, "Identical item IDs do not make an old row's callbacks and scroll state valid for a new owner");
             Assert.IsLessThan(2d, current.Scroll.ScrollableHeight - current.Scroll.VerticalOffset);
         }

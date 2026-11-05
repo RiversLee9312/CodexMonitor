@@ -394,11 +394,11 @@ public sealed partial class TranscriptCard : UserControl
         list.Loaded += (_, _) =>
         {
             var scroll = ScrollViewerIn(list); if (scroll is null) return;
-            var initialFollow = row.CanFollow?.Invoke() == true;
             var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
-            var restoring = true; var previousOffset = scroll.VerticalOffset; var initialInput = list.InputVersion;
+            var restoring = true; var previousOffset = scroll.VerticalOffset; var initialInput = list.InputVersion; var retired = false;
             EventHandler<ScrollViewerViewChangedEventArgs> viewChanged = (_, args) =>
             {
+                if (list.InputVersion != initialInput) restoring = false;
                 if (!restoring && list.IsLoaded && scroll.ScrollableHeight > 0)
                 {
                     if (!args.IsIntermediate) row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
@@ -409,17 +409,27 @@ public sealed partial class TranscriptCard : UserControl
                 if (!args.IsIntermediate) userScrolling = false;
             };
             scroll.ViewChanged += viewChanged;
-            EventHandler<object>? layout = null;
-            layout = (_, _) =>
+            list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
             {
-                if (list.InputVersion != initialInput) { restoring = false; list.LayoutUpdated -= layout; return; }
-                if (!restoring || scroll.ScrollableHeight <= 0) return;
-                scroll.ChangeView(null, initialFollow ? scroll.ScrollableHeight : Math.Min(savedOffset, scroll.ScrollableHeight), null, true); restoring = false;
-                list.LayoutUpdated -= layout;
-            };
-            list.LayoutUpdated += layout;
+                try
+                {
+                    int stable = 0;
+                    for (int attempt = 0; attempt < 24 && !retired && list.IsLoaded && list.InputVersion == initialInput; attempt++)
+                    {
+                        list.UpdateLayout();
+                        if (scroll.ViewportHeight > 0 && scroll.ExtentHeight > 0)
+                        {
+                            var target = row.CanFollow?.Invoke() == true ? scroll.ScrollableHeight : Math.Min(savedOffset, scroll.ScrollableHeight);
+                            if (Math.Abs(scroll.VerticalOffset - target) < .5) { if (++stable >= 2) break; }
+                            else { stable = 0; scroll.ChangeView(null, target, null, true); }
+                        }
+                        await Task.Delay(16);
+                    }
+                }
+                finally { restoring = false; }
+            });
             RoutedEventHandler? unloaded = null;
-            unloaded = (_, _) => { scroll.ViewChanged -= viewChanged; list.LayoutUpdated -= layout; list.Unloaded -= unloaded; };
+            unloaded = (_, _) => { retired = true; scroll.ViewChanged -= viewChanged; list.Unloaded -= unloaded; };
             list.Unloaded += unloaded;
         };
         return new ActivityGroupView(row, list);

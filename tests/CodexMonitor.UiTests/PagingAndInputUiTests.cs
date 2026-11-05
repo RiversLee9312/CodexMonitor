@@ -64,7 +64,7 @@ public sealed class PagingAndInputUiTests
             await using (var writer = new StreamWriter(path))
                 for (int i = 0; i < 2400; i++) await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "response_item", payload = new { type = "message", role = i % 2 == 0 ? "user" : "assistant", content = new[] { new { type = "text", text = "Paged message " + i + "\n\nSelectable **message** with `code` and a [link](https://example.com).\nSelectable **message** with `code` and a [link](https://example.com)." } } } }));
             if (compressed) await CompressFixture(path);
-            var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Dark", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
+            var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Dark", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(open: true); await MainWindow.SettleAsync();
             Assert.AreEqual(300, window.ReviewLoadedCount); Assert.IsTrue(window.ReviewHasEarlier);
             var anchor = await window.ReviewScrollToEarlierAsync();
             for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30);
@@ -87,9 +87,10 @@ public sealed class PagingAndInputUiTests
             await using (var writer = new StreamWriter(path))
                 for (int i = 0; i < 1200; i++) await writer.WriteLineAsync(JsonSerializer.Serialize(new { type = "response_item", payload = new { type = "function_call", call_id = "c" + i, name = "exec_command", arguments = "{\"cmd\":\"echo " + i + "\"}" } }));
             if (compressed) await CompressFixture(path);
-            var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Light", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
+            var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Light", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(open: true); await MainWindow.SettleAsync();
             var disclosure = window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal));
             var initial = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            for (int i = 0; i < 80 && initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset >= 2; i++) await Task.Delay(25);
             TestContext.WriteLine("Initial work viewport: " + window.ReviewScrollDebug + ", " + window.ReviewHistoryState);
             Assert.IsLessThan(2d, initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset, "A newly opened work process starts at its latest activity");
             var anchor = await window.ReviewScrollToolHistoryAsync(); for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30); await MainWindow.SettleAsync();

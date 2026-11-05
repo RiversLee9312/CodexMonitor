@@ -251,7 +251,7 @@ public sealed partial class MainWindow
     internal bool ReviewNativeHighContrast => _themeSettings.HighContrast;
     internal void ReviewTranscriptFile(string path) { _selected = _selected! with { FilePath = path }; }
     internal void ReviewLocalReader(Func<SessionInfo, CancellationToken, Task<TranscriptSnapshot>> reader) => _readLocalTranscript = reader;
-    internal Task ReviewReloadTranscript() => LoadTranscriptAsync(_selected!, false);
+    internal Task ReviewReloadTranscript(bool open = false) => LoadTranscriptAsync(_selected!, open);
     internal void ReviewUsePaging() { _pagedReview = true; _following = true; }
     internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
     internal bool ReviewHasEarlier => _hasEarlier;
