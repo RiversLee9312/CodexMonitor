@@ -1,5 +1,12 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="using:CodexMonitor.App">
   <DataTemplate x:Key="RepeaterListContainer"><local:RepeaterListItem/></DataTemplate>
+  <Style x:Key="RepeaterRowStyle" TargetType="local:RepeaterListItem">
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:RepeaterListItem">
+      <Border x:Name="Chrome" Padding="{TemplateBinding Padding}" CornerRadius="4">
+        <ContentPresenter x:Name="ContentPresenter" Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+      </Border>
+    </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style TargetType="FontIcon"><Setter Property="IsTextScaleFactorEnabled" Value="False"/></Style>
   <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
     <Setter Property="MinWidth" Value="40"/><Setter Property="MinHeight" Value="40"/>

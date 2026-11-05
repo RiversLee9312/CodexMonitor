@@ -77,6 +77,7 @@ public sealed class PagingAndInputUiTests
     [UITestMethod, DataRow(false), DataRow(true)]
     public async Task PagingInsideAToolGroupKeepsTheGroupDisclosureAndNestedAnchor(bool compressed)
     {
+        ScrollAnchor.Diagnostics = TestContext.WriteLine;
         var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-tool-pages-" + Guid.NewGuid() + ".jsonl");
         try
         {
@@ -85,12 +86,17 @@ public sealed class PagingAndInputUiTests
             if (compressed) await CompressFixture(path);
             var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Light", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
             var disclosure = window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal));
+            var initial = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            Assert.IsLessThan(2d, initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset, "A newly opened work process starts at its latest activity");
             var anchor = await window.ReviewScrollToolHistoryAsync(); for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30); await MainWindow.SettleAsync();
             Assert.AreEqual(600, window.ReviewLoadedCount); Assert.AreSame(disclosure, window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal)));
-            var y = ((FrameworkElement)anchor.List.ContainerFromItem(anchor.Item)).TransformToVisual(anchor.List).TransformPoint(new(0, 0)).Y; Assert.AreEqual(anchor.Y, y, 2);
+            Assert.IsInstanceOfType<FrameworkElement>(anchor.List.ContainerFromItem(anchor.Item));
+            var y = ((FrameworkElement)anchor.List.ContainerFromItem(anchor.Item)!).TransformToVisual(anchor.List).TransformPoint(new(0, 0)).Y; Assert.AreEqual(anchor.Y, y, 2);
             TestContext.AddResultFile(await window.CaptureReviewAsync("automatic-tool-history-light"));
+            await window.ReviewNativeWorkScrollAsync();
+            Assert.AreEqual(900, window.ReviewLoadedCount, "Accessibility scrolling inside the group must request the next page without calling the paging entry point");
         }
-        finally { File.Delete(path); File.Delete(path + ".zst"); }
+        finally { ScrollAnchor.Diagnostics = null; File.Delete(path); File.Delete(path + ".zst"); }
     }
     private static async Task CompressFixture(string path)
     {

@@ -111,6 +111,11 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 860));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         MessageList.ItemsSource = _messages;
+        MessageList.NavigationRequested += forward =>
+        {
+            ++_transcriptViewportInput; _jumpingLatest = false; ++_latestScrollGeneration;
+            if (forward) _earlierRequested = false; else { _following = false; RequestEarlier(); }
+        };
         MessageList.Transitions = [];
         MessageList.LayoutUpdated += (_, _) => { if (_historyAwaitingLayout) { _historyAwaitingLayout = false; QueueEarlierCheck(); } };
         MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
@@ -120,7 +125,7 @@ public sealed partial class MainWindow : Window
             if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) { _earlierRequested = false; return; }
             _following = false;
             for (var node = e.OriginalSource as DependencyObject; node is not null && node != MessageList; node = VisualTreeHelper.GetParent(node))
-                if (node is ScrollViewer inner && inner.VerticalOffset > 160) return;
+                if (node is ScrollViewer inner && !ReferenceEquals(inner, MessageList.Scroll) && inner.VerticalOffset > 160) return;
             RequestEarlier();
         }), true);
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
@@ -492,7 +497,13 @@ public sealed partial class MainWindow : Window
         var viewingId = _selected?.Id;
         var authority = _historyClient;
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
-            reading => { if (_selected?.Id == viewingId && reading) { _readingActivityHistory = true; _following = false; SetLatestVisible(true); } }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier,
+            reading =>
+            {
+                if (_selected?.Id != viewingId) return;
+                _readingActivityHistory = reading;
+                var atEnd = !reading && _messageScroll is { } viewport && viewport.ScrollableHeight - viewport.VerticalOffset < 24;
+                _following = atEnd; SetLatestVisible(!atEnd);
+            }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier,
             id => authority is null ? _snapshot.Turns.GetValueOrDefault(id) : authority.Models.Details(viewingId!, id),
             authority is null ? null : async (info, ct) =>
             {
@@ -507,7 +518,9 @@ public sealed partial class MainWindow : Window
         foreach (var container in MessageList.RealizedElements)
             if (container.Content is EntryRow row) TranscriptCard.PreserveScroll(container, row);
         if (_messages.Count != rows.Count || !_messages.Select(e => e.Entry.Id).SequenceEqual(rows.Select(e => e.Entry.Id))) _historyAwaitingLayout = true;
+        var restoring = MessageList.BeginRestoration();
         EntryRows.Synchronize(_messages, rows);
+        MessageList.EndRestoration(restoring);
         anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
@@ -1009,7 +1022,7 @@ public sealed partial class MainWindow : Window
         => DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, TrackTranscriptScroll);
     private void TrackTranscriptScroll()
     {
-        var scroll = FindVisual<ScrollViewer>(MessageList);
+        var scroll = MessageList.Scroll;
         if (ReferenceEquals(scroll, _messageScroll)) return;
         if (_messageScroll is not null) _messageScroll.ViewChanged -= OnTranscriptViewChanged;
         _messageScroll = scroll;
@@ -1020,11 +1033,11 @@ public sealed partial class MainWindow : Window
         if (_messageScroll is null) return;
         var up = _messageScroll.VerticalOffset < _previousTranscriptOffset;
         _previousTranscriptOffset = _messageScroll.VerticalOffset;
-        if (args.IsIntermediate) ++_transcriptViewportInput;
-        if (_jumpingLatest) return;
-        _following = !_readingActivityHistory && _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
-        SetLatestVisible(!_following);
-        if (up && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
+        if (_jumpingLatest || MessageList.IsRestoringPosition) return;
+        var atEnd = _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
+        if (args.IsIntermediate || atEnd) _following = !_readingActivityHistory && atEnd;
+        SetLatestVisible(_readingActivityHistory || !_following && !atEnd);
+        if (up && args.IsIntermediate && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
     }
     private void SetLatestVisible(bool visible)
     {

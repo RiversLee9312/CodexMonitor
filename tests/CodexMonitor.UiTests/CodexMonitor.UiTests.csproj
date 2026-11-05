@@ -28,6 +28,7 @@
     <Compile Include="..\..\src\CodexMonitor.App\EntryRows.cs" Link="EntryRows.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\SessionListController.cs" Link="SessionListController.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\RepeaterList.cs" Link="RepeaterList.cs"/>
+    <Compile Include="..\..\src\CodexMonitor.App\WorkProcessLayout.cs" Link="WorkProcessLayout.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\SessionListView.cs" Link="SessionListView.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\DateFilterPanel.cs" Link="DateFilterPanel.cs"/>
     <Compile Include="..\..\src\CodexMonitor.App\ScrollAnchor.cs" Link="ScrollAnchor.cs"/>

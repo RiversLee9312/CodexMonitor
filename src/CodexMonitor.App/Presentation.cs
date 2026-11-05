@@ -254,8 +254,11 @@ public sealed partial class TranscriptCard : UserControl
             var scroll = ScrollViewerIn(list); var follow = next.CanFollow?.Invoke() == true && (scroll is null || scroll.ScrollableHeight - scroll.VerticalOffset < 24);
             var incoming = next.Activities.Select(entry => new EntryRow(entry, next.Text, expanded: next.Expanded, live: next.IsLive, scrollOffsets: next.ScrollOffsets, historyChanged: next.HistoryChanged, canFollow: next.CanFollow)).ToArray();
             var anchor = !follow && incoming.Length > children.Count ? ScrollAnchor.Capture(list) : null;
-            EntryRows.Synchronize(children, incoming);
+            ScrollAnchor.Diagnostics?.Invoke($"group update {children.Count}->{incoming.Length} follow={follow} loaded={list.IsLoaded} visible={list.FirstVisibleIndex} anchor={anchor is not null}");
+            var restoringPosition = anchor is not null ? list.BeginRestoration() : 0;
+            using (list.DeferUpdates()) EntryRows.Synchronize(children, incoming);
             group.Update(next);
+            if (restoringPosition != 0) list.EndRestoration(restoringPosition);
             anchor?.Restore();
             if (follow && !next.IsGroupCollapsed && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); });
             return;
@@ -370,31 +373,37 @@ public sealed partial class TranscriptCard : UserControl
         if (!row.IsWorkProcess) return ToolRow(row.Activities[0], row);
         // One inline disclosure per operation, without nested group cards or repeated role/time headers.
         var template = _workItemTemplate ??= (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:TranscriptCard Row='{Binding}'/></DataTemplate>");
-        var itemStyle = _workItemStyle ??= (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='ListViewItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='40'/></Style>");
+        var itemStyle = _workItemStyle ??= (Style)Microsoft.UI.Xaml.Markup.XamlReader.Load("<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App' TargetType='local:RepeaterListItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='Margin' Value='0'/><Setter Property='MinHeight' Value='40'/></Style>");
+        if (itemStyle.BasedOn is null) itemStyle.BasedOn = (Style)Application.Current.Resources["RepeaterRowStyle"];
         var list = new RepeaterList { MaxHeight = 480, SelectionMode = ListViewSelectionMode.None, IsTabStop = false, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new Thickness(0), ItemTemplate = template, ItemContainerStyle = itemStyle,
             Transitions = [], ItemsSource = new ObservableCollection<EntryRow>(row.Activities.Select(entry => new EntryRow(entry, row.Text, expanded: row.Expanded, live: row.IsLive, scrollOffsets: row.ScrollOffsets, historyChanged: row.HistoryChanged, canFollow: row.CanFollow))) };
+        list.Repeater.Layout = new WorkProcessLayout(list);
+        list.Scroll.ViewChanged += (_, _) => list.Repeater.InvalidateMeasure();
         ScrollViewer.SetIsVerticalScrollChainingEnabled(list, true);
         var userScrolling = false;
+        list.NavigationRequested += forward => { userScrolling = true; if (!forward) row.Earlier?.Invoke(); };
         list.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
         list.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
         list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => userScrolling = true), true);
-        var initialFollow = !row.ScrollOffsets.ContainsKey(row.Entry.Id) && row.CanFollow?.Invoke() == true;
-        var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
         list.Loaded += (_, _) =>
         {
             var scroll = ScrollViewerIn(list); if (scroll is null) return;
+            var initialFollow = !row.ScrollOffsets.ContainsKey(row.Entry.Id) && row.CanFollow?.Invoke() == true;
+            var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
             var restoring = true; var previousOffset = scroll.VerticalOffset;
-            scroll.ViewChanged += (_, args) =>
+            EventHandler<ScrollViewerViewChangedEventArgs> viewChanged = (_, args) =>
             {
-                if (!restoring && !args.IsIntermediate && list.IsLoaded && scroll.ScrollableHeight > 0)
+                if (!restoring && list.IsLoaded && scroll.ScrollableHeight > 0)
                 {
-                    row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
-                    if (userScrolling) row.HistoryChanged?.Invoke(scroll.ScrollableHeight - scroll.VerticalOffset > 24);
-                    if (userScrolling && scroll.VerticalOffset < previousOffset && scroll.VerticalOffset < 160) row.Earlier?.Invoke();
+                    if (!args.IsIntermediate) row.ScrollOffsets[row.Entry.Id] = scroll.VerticalOffset;
+                    if (userScrolling && !list.IsRestoringPosition) row.HistoryChanged?.Invoke(scroll.ScrollableHeight - scroll.VerticalOffset > 24);
+                    if (userScrolling && !list.IsRestoringPosition && scroll.VerticalOffset < previousOffset && scroll.VerticalOffset < 160) row.Earlier?.Invoke();
                 }
                 previousOffset = scroll.VerticalOffset;
+                if (!args.IsIntermediate) userScrolling = false;
             };
+            scroll.ViewChanged += viewChanged;
             EventHandler<object>? layout = null;
             layout = (_, _) =>
             {
@@ -403,7 +412,9 @@ public sealed partial class TranscriptCard : UserControl
                 list.LayoutUpdated -= layout;
             };
             list.LayoutUpdated += layout;
-            list.Unloaded += (_, _) => list.LayoutUpdated -= layout;
+            RoutedEventHandler? unloaded = null;
+            unloaded = (_, _) => { scroll.ViewChanged -= viewChanged; list.LayoutUpdated -= layout; list.Unloaded -= unloaded; };
+            list.Unloaded += unloaded;
         };
         return new ActivityGroupView(row, list);
     }

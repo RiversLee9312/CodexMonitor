@@ -27,7 +27,7 @@
           </Grid>
           <Grid Grid.Row="3">
             <local:SessionListView x:Name="SessionList" SelectionMode="Single" SelectionChanged="OnSessionSelected" Padding="0,0,0,12" HorizontalContentAlignment="Stretch" Background="Transparent">
-              <local:RepeaterList.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></local:RepeaterList.ItemContainerStyle>
+              <local:RepeaterList.ItemContainerStyle><Style TargetType="local:RepeaterListItem" BasedOn="{StaticResource RepeaterRowStyle}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="10,12"/><Setter Property="Margin" Value="0,2"/><Setter Property="MinHeight" Value="84"/></Style></local:RepeaterList.ItemContainerStyle>
               <local:RepeaterList.ItemTemplate>
                 <DataTemplate x:DataType="local:SessionRow">
                   <Grid RowSpacing="5" ToolTipService.ToolTip="{x:Bind AccessibleName, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
@@ -101,7 +101,7 @@
               </Grid>
               <Grid Grid.Row="1">
                 <local:RepeaterList x:Name="MessageList" Background="Transparent" SelectionMode="None" HorizontalContentAlignment="Stretch" Padding="16,4,16,16" Loaded="OnMessageListLoaded" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                      <local:RepeaterList.ItemContainerStyle><Style TargetType="ListViewItem" x:DataType="local:EntryRow"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></local:RepeaterList.ItemContainerStyle>
+                      <local:RepeaterList.ItemContainerStyle><Style TargetType="local:RepeaterListItem" BasedOn="{StaticResource RepeaterRowStyle}" x:DataType="local:EntryRow"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="IsTabStop" Value="False"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/></Style></local:RepeaterList.ItemContainerStyle>
                   <local:RepeaterList.ItemTemplate><DataTemplate x:DataType="local:EntryRow"><local:TranscriptCard Row="{x:Bind}" HorizontalAlignment="Stretch" MaxWidth="920"/></DataTemplate></local:RepeaterList.ItemTemplate>
                 </local:RepeaterList>
                 <TextBlock x:Name="NoMessagesText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>

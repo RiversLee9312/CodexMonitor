@@ -54,7 +54,7 @@ public partial class TestApp : Application
                 try
                 {
                     var state = System.Text.Json.JsonSerializer.Serialize(new { MaxDispatcherGapMs = maxGap, Beats = beats, Rows = ReviewWindow.ReviewSessionRows.Count,
-                        Selected = (ReviewWindow.ReviewSelectedRow as CodexMonitor.App.SessionRow)?.Session.Id, Loading = ReviewWindow.ReviewTranscriptLoading, Messages = ReviewWindow.ReviewMessageRows.Count, Loaded = ReviewWindow.ReviewLoadedCount, Earlier = ReviewWindow.ReviewHasEarlier, History = ReviewWindow.ReviewHistoryState, Realized = ReviewWindow.ReviewVisualElements<CodexMonitor.App.RepeaterList>().Select(l => l.RealizedElements.Count()).ToArray() });
+                        Selected = (ReviewWindow.ReviewSelectedRow as CodexMonitor.App.SessionRow)?.Session.Id, Loading = ReviewWindow.ReviewTranscriptLoading, Messages = ReviewWindow.ReviewMessageRows.Count, Loaded = ReviewWindow.ReviewLoadedCount, Earlier = ReviewWindow.ReviewHasEarlier, History = ReviewWindow.ReviewHistoryState, Realized = ReviewWindow.ReviewVisualElements<CodexMonitor.App.RepeaterList>().Select(l => l.RealizedElements.Count()).ToArray(), Viewports = ReviewWindow.ReviewVisualElements<CodexMonitor.App.RepeaterList>().Select(l => new { Offset = l.Scroll.VerticalOffset, Extent = l.Scroll.ExtentHeight, Height = l.Scroll.ViewportHeight, First = l.FirstVisibleIndex, Last = l.LastVisibleIndex }).ToArray() });
                     await Task.Run(() => File.WriteAllTextAsync(output, state));
                 }
                 finally { writing = false; }

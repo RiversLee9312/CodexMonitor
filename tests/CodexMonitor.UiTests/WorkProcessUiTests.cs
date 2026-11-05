@@ -12,6 +12,23 @@ namespace CodexMonitor.UiTests;
 [TestClass, DoNotParallelize]
 public sealed class WorkProcessUiTests
 {
+    [TestMethod]
+    public void VariableHeightViewportIndexMatchesTheVisibleRowsAfterStreamingAndPrepending()
+    {
+        var random = new Random(7391);
+        var values = Enumerable.Range(0, 1800).Select(_ => 40d + random.Next(250)).ToArray();
+        var index = new WorkProcessLayout.HeightIndex(); index.Reset(values.ToArray());
+        for (int update = 0; update < 250; update++)
+        {
+            var changed = random.Next(values.Length); values[changed] = 40 + random.Next(400); index.Set(changed, values[changed]);
+            var offset = random.NextDouble() * values.Sum(); double sum = 0; int expected = 0;
+            while (expected < values.Length - 1 && sum + values[expected] <= offset) sum += values[expected++];
+            Assert.AreEqual(expected, index.At(offset)); Assert.AreEqual(sum, index.Before(expected), .001);
+        }
+        values = Enumerable.Repeat(40d, 300).Concat(values).ToArray(); index.Reset(values);
+        Assert.AreEqual(values.Sum(), index.Total, .001); Assert.AreEqual(300, index.At(12000));
+        Assert.AreEqual(values.Length - 1, index.At(index.Total));
+    }
     public TestContext TestContext { get; set; } = null!;
     [UITestMethod, DataRow("Dark", "zh-CN"), DataRow("Light", "ar-SA")]
     public async Task AutomaticCollapseKeepsManualChoicesAndNeverFoldsOngoingWork(string theme, string language)
@@ -49,7 +66,7 @@ public sealed class WorkProcessUiTests
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Light", "zh-CN"); await window.ShowActivityReviewAsync();
         var lists = window.ReviewVisualElements<RepeaterList>(); Assert.HasCount(3, lists);
         Assert.IsFalse(window.ReviewVisualElements<ListView>().Any());
-        foreach (var list in lists) { Assert.IsInstanceOfType<StackLayout>(list.Repeater.Layout); Assert.IsTrue(list.RealizedElements.Count() < 30); }
+        foreach (var list in lists) { Assert.IsInstanceOfType<VirtualizingLayout>(list.Repeater.Layout); Assert.IsTrue(list.RealizedElements.Count() < 30); }
         var sessions = lists.Single(l => l.SelectionMode == ListViewSelectionMode.Single);
         Assert.IsTrue(window.ReviewVisualElements<TextBlock>().Any(t => t.Text == "CodexMonitor"), "Folder bindings must run outside ListView's phased binding mechanism");
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(sessions);

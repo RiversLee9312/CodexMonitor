@@ -220,7 +220,7 @@ public sealed partial class MainWindow
         }
         else { _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("activity-new", EntryKind.Tool, "echo new", DateTimeOffset.Now, Tool: new("shell", "echo new", "OK", ToolActivityState.Completed))).ToArray() }; RenderMessages(); await SettleAsync(); }
         var group = FindVisual<RepeaterList>(MessageList) ?? throw new InvalidOperationException("Activity list not realized");
-        var scroll = FindVisual<ScrollViewer>(group)!;
+        var scroll = group.Scroll;
         if (!update) { scroll.ChangeView(null, 700, null, true); await SettleAsync(); }
         return scroll.VerticalOffset;
     }
@@ -232,12 +232,12 @@ public sealed partial class MainWindow
         _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("reply-new", EntryKind.Assistant, "A new reply arrived.", DateTimeOffset.Now)).ToArray() };
         RenderMessages(); await SettleAsync();
         var current = FindVisual<RepeaterList>(MessageList)!;
-        return (before, FindVisual<ScrollViewer>(current)!.VerticalOffset, !_following && LatestButton.Visibility == Visibility.Visible, ReferenceEquals(group, current));
+        return (before, current.Scroll.VerticalOffset, !_following && LatestButton.Visibility == Visibility.Visible, ReferenceEquals(group, current));
     }
     internal async Task<bool> ActivityAtEndFollowsNewItemsReviewAsync()
     {
         await ActivityScrollReviewAsync(false); _following = true;
-        var group = FindVisual<RepeaterList>(MessageList)!; var scroll = FindVisual<ScrollViewer>(group)!;
+        var group = FindVisual<RepeaterList>(MessageList)!; var scroll = group.Scroll;
         scroll.ChangeView(null, scroll.ScrollableHeight, null, true); await SettleAsync();
         await ActivityScrollReviewAsync(true); await SettleAsync();
         return scroll.ScrollableHeight - scroll.VerticalOffset < 2;
@@ -264,6 +264,16 @@ public sealed partial class MainWindow
         var flyout = (Flyout)button.Flyout; flyout.ShowAt(button); await SettleAsync(); return flyout;
     }
     internal Task ReviewLoadEarlierAsync() => LoadEarlierAsync();
+    internal async Task ReviewNativeWorkScrollAsync()
+    {
+        var group = FindVisual<ActivityGroupView>(MessageList)!;
+        var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.CreatePeerForElement(group.List);
+        ((Microsoft.UI.Xaml.Automation.Provider.IScrollProvider)peer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Scroll)).SetScrollPercent(-1, 0);
+        await SettleAsync();
+        for (int i = 0; i < 100 && ReviewLoadingEarlier; i++) await Task.Delay(20);
+        await SettleAsync();
+        if (group.List.FirstVisibleIndex < 0 || ScrollAnchor.Capture(group.List) is null) throw new InvalidOperationException("The nested viewport has no visible realized item");
+    }
     internal string ReviewHistoryState => $"loaded={ReviewLoadedCount}, earlier={_hasEarlier}, loading={_loadingEarlier}, offset={_messageScroll?.VerticalOffset}, start={_historyStart}, latest={_jumpingLatest}, notice={(Notice.IsOpen ? Notice.Message : "")}";
     internal async Task<(object Item, double Y)> ReviewScrollToEarlierAsync()
     {
@@ -277,7 +287,9 @@ public sealed partial class MainWindow
     internal async Task<(RepeaterList List, object Item, double Y)> ReviewScrollToolHistoryAsync()
     {
         var group = FindVisual<RepeaterList>(MessageList)!; var scroll = ScrollAnchor.FindScroll(group)!;
-        _loadingEarlier = true; _following = false; scroll.ChangeView(null, 150, null, true); await SettleAsync();
+        _loadingEarlier = true; _following = false; _jumpingLatest = false; ++_latestScrollGeneration;
+        MessageList.BeginNavigation(false); group.BeginNavigation(false);
+        scroll.ChangeView(null, 150, null, true); await SettleAsync();
         var anchor = ScrollAnchor.Capture(group)!; _loadingEarlier = false; RequestEarlier(); return (group, anchor.Item, anchor.Y);
     }
     internal Task ReviewUserInputAsync(CodexClient client, RpcMessage message) => HandleRequestAsync(client, message);
