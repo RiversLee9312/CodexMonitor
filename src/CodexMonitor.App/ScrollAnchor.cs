@@ -6,7 +6,7 @@ namespace CodexMonitor.App;
 
 internal sealed record ScrollAnchor(RepeaterList List, object Item, double Y, long InputVersion)
 {
-    internal static Action<string>? Diagnostics;
+    internal static Action<string>? Diagnostics { get; set; }
     internal static ScrollAnchor? Capture(RepeaterList list)
     {
         foreach (var element in list.RealizedElements)

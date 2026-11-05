@@ -181,7 +181,7 @@ public partial class RepeaterList : UserControl
                 else CollectionChanged?.Invoke(this, new(NotifyCollectionChangedAction.Reset));
             });
         }
-        private sealed class Scope(Action commit) : IDisposable { private Action? _commit = commit; public void Dispose() => Interlocked.Exchange(ref _commit, null)?.Invoke(); }
+        private sealed partial class Scope(Action commit) : IDisposable { private Action? _commit = commit; public void Dispose() => Interlocked.Exchange(ref _commit, null)?.Invoke(); }
     }
     private void OnNavigation(object sender, KeyRoutedEventArgs e)
     {
