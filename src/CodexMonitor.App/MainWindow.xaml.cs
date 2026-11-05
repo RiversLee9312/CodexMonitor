@@ -62,6 +62,7 @@ public sealed partial class MainWindow : Window
     private bool _latestVisible;
     private Storyboard? _latestTransition;
     private bool _jumpingLatest;
+    private bool _transcriptScrollingFromInput;
     private long _latestScrollGeneration;
     private long _transcriptViewportInput;
     private long _selectedLength = -1;
@@ -113,6 +114,7 @@ public sealed partial class MainWindow : Window
         MessageList.ItemsSource = _messages;
         MessageList.NavigationRequested += forward =>
         {
+            _transcriptScrollingFromInput = true;
             ++_transcriptViewportInput; _jumpingLatest = false; ++_latestScrollGeneration;
             _following = false;
             if (forward) _earlierRequested = false; else { _following = false; RequestEarlier(); }
@@ -121,6 +123,7 @@ public sealed partial class MainWindow : Window
         MessageList.LayoutUpdated += (_, _) => { if (_historyAwaitingLayout) { _historyAwaitingLayout = false; QueueEarlierCheck(); } };
         MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
+            _transcriptScrollingFromInput = true;
             ++_transcriptViewportInput;
             _jumpingLatest = false; ++_latestScrollGeneration;
             if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) { _earlierRequested = false; return; }
@@ -130,9 +133,9 @@ public sealed partial class MainWindow : Window
             RequestEarlier();
         }), true);
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
-        { ++_transcriptViewportInput; if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
+        { _transcriptScrollingFromInput = true; ++_transcriptViewportInput; if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
         MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
-        { ++_transcriptViewportInput; _following = false; _jumpingLatest = false; ++_latestScrollGeneration; }), true);
+        { _transcriptScrollingFromInput = true; ++_transcriptViewportInput; _following = false; _jumpingLatest = false; ++_latestScrollGeneration; }), true);
         SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.Transitions = _noSessionTransitions;
@@ -431,6 +434,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading, IReadOnlyList<RpcMessage>? initialNotifications = null)
     {
+        _transcriptScrollingFromInput = false;
         var generation = ++_transcriptReadGeneration;
         CancelEarlierRead();
         if (_localPagerSession != session.Id) RetireLocalPager();
@@ -1039,7 +1043,8 @@ public sealed partial class MainWindow : Window
         var atEnd = _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
         if (atEnd && !_readingActivityHistory) _following = true;
         SetLatestVisible(_readingActivityHistory || !_following && !atEnd);
-        if (up && args.IsIntermediate && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
+        if (up && _transcriptScrollingFromInput && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
+        if (!args.IsIntermediate) _transcriptScrollingFromInput = false;
     }
     private void SetLatestVisible(bool visible)
     {
@@ -1067,6 +1072,7 @@ public sealed partial class MainWindow : Window
     }
     private async void ScrollLatest()
     {
+        ScrollAnchor.Diagnostics?.Invoke($"latest start count={_messages.Count} following={_following} generation={_latestScrollGeneration}");
         if (_messages.Count == 0 || !_following || _closing) return;
         var generation = ++_latestScrollGeneration; _jumpingLatest = true;
         // Virtualized item heights become exact only after realization. Settle the end over a few frames,

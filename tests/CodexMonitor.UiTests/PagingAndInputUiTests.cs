@@ -87,6 +87,7 @@ public sealed class PagingAndInputUiTests
             var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Light", "zh-CN"); window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(); await MainWindow.SettleAsync();
             var disclosure = window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal));
             var initial = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            TestContext.WriteLine("Initial work viewport: " + window.ReviewScrollDebug + ", " + window.ReviewHistoryState);
             Assert.IsLessThan(2d, initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset, "A newly opened work process starts at its latest activity");
             var anchor = await window.ReviewScrollToolHistoryAsync(); for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30); await MainWindow.SettleAsync();
             Assert.AreEqual(600, window.ReviewLoadedCount); Assert.AreSame(disclosure, window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal)));

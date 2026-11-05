@@ -52,6 +52,9 @@ public sealed partial class MainWindow
         _following = false;
         _messageScroll?.ChangeView(null, 0, null, true);
         await SettleAsync();
+        // Each fixture starts with focus in the sidebar, like selecting a conversation.
+        // A removed dialog's restored focus must not bring a new transcript child into view.
+        SessionSearch.Focus(FocusState.Programmatic);
     }
     internal async Task SwitchReviewThemeAsync(string theme)
     {
@@ -306,7 +309,7 @@ public sealed partial class MainWindow
     }
     internal bool ReviewLatestVisible => _latestVisible && LatestButton.Visibility == Visibility.Visible;
     internal bool ReviewReasoningHasInlineSummary => Descendants(Descendants(MessageList).OfType<TranscriptCard>().First(c => c.Row?.Entry.Id == "thinking-review")).OfType<RichTextBlock>().Any();
-    internal string ReviewScrollDebug => $"offset={_messageScroll?.VerticalOffset}, max={_messageScroll?.ScrollableHeight}, following={_following}, visible={_latestVisible}";
+    internal string ReviewScrollDebug => $"offset={_messageScroll?.VerticalOffset}, max={_messageScroll?.ScrollableHeight}, following={_following}, visible={_latestVisible}, reading={_readingActivityHistory}, input={_transcriptScrollingFromInput}, jumping={_jumpingLatest}";
     internal double ReviewLatestOpacity => LatestButton.Opacity;
     internal string ReviewLatestName => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(LatestButton);
     internal Windows.Foundation.Rect ReviewLatestBounds => LatestButton.TransformToVisual(Root).TransformBounds(new(0, 0, LatestButton.ActualWidth, LatestButton.ActualHeight));
