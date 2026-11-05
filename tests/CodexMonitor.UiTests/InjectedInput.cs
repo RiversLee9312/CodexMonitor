@@ -23,7 +23,10 @@ internal sealed class InjectedInput(MainWindow window)
     private void EnsureTarget()
     {
         if (GetAncestor(GetForegroundWindow(), 3) != GetAncestor(_handle, 3))
-            throw new InvalidOperationException("Input injection stopped because the test window lost foreground ownership: expected " + _handle + ", actual " + GetForegroundWindow());
+        {
+            var foreground = GetForegroundWindow(); GetWindowThreadProcessId(foreground, out var process);
+            throw new InvalidOperationException("Input injection stopped because the test window lost foreground ownership: expected " + _handle + ", actual " + foreground + ", process=" + process);
+        }
     }
     internal Point ScreenPoint(FrameworkElement element, double x = .5, double y = .5)
     {

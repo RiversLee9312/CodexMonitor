@@ -20,6 +20,18 @@ public sealed partial class InjectedScrollUiTests
         while (!complete() && DateTime.UtcNow < until) await Task.Delay(20);
         Assert.IsTrue(complete(), message);
     }
+    private static async Task WaitForScrollIdle(ScrollViewer scroll)
+    {
+        var until = DateTime.UtcNow.AddSeconds(8); var offset = scroll.VerticalOffset; var extent = scroll.ExtentHeight; int stable = 0;
+        while (stable < 5 && DateTime.UtcNow < until)
+        {
+            await Task.Delay(40);
+            if (Math.Abs(scroll.VerticalOffset - offset) < .2 && Math.Abs(scroll.ExtentHeight - extent) < .2) stable++; else stable = 0;
+            offset = scroll.VerticalOffset; extent = scroll.ExtentHeight;
+        }
+        Assert.IsTrue(stable >= 5, "The native scrolling animation must settle before checking layout geometry");
+        await MainWindow.SettleAsync();
+    }
     private static async Task<string> HistoryAsync(int count, bool tools = false)
     {
         var path = Path.Combine(Path.GetTempPath(), "CodexMonitor-injected-" + Guid.NewGuid() + ".jsonl");

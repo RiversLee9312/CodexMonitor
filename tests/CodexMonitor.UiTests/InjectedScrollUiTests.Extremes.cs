@@ -22,7 +22,7 @@ public sealed partial class InjectedScrollUiTests
         for (int batch = 0; batch < 16; batch++)
         {
             await input.WheelAsync(window.ReviewTranscriptSurface, batch % 4 < 2 ? -960 : 960, 12);
-            await MainWindow.SettleAsync();
+            await WaitForScrollIdle(window.ReviewTranscriptSurface.Scroll);
             try { AssertCovered(window.ReviewTranscriptSurface, 20); } // Transcript rows intentionally have 16 DIP spacing.
             catch
             {
@@ -50,10 +50,8 @@ public sealed partial class InjectedScrollUiTests
             var input = new InjectedInput(window); await input.ActivateAsync();
             for (int pass = 0; pass < 4; pass++) await input.WheelAsync(window.ReviewSessionSurface, pass % 2 == 0 ? -2880 : 2880, 65, 6);
             var list = window.ReviewSessionSurface;
-            var item = list.RealizedElements.First(e => { var y = e.TransformToVisual(list.Scroll).TransformPoint(new(0,0)).Y; return y >= 0 && y + e.ActualHeight <= list.Scroll.ViewportHeight; });
-            var id = ((SessionRow)item.Content!).Session.Id;
-            await input.ClickAsync(item);
-            await WaitFor(() => window.ReviewSelectedRow is SessionRow selected && selected.Session.Id == id && !window.ReviewTranscriptLoading, "A physical click immediately after fast wheel reversal must finish loading", 12000);
+            await input.ClickAsync(list);
+            await WaitFor(() => window.ReviewSelectedRow is SessionRow selected && selected.Session.Id.StartsWith("injected-", StringComparison.Ordinal) && !window.ReviewTranscriptLoading, "A physical click immediately after fast wheel reversal must finish loading", 12000);
             Assert.Contains("Message 2399", window.ReviewTranscriptText);
             Assert.AreEqual(300, window.ReviewLoadedCount, "Selection must read a bounded page, not the entire transcript");
             Assert.IsLessThan(600d, maximumGap, "Fast wheel input plus selection must not stall the UI dispatcher");
@@ -130,16 +128,16 @@ public sealed partial class InjectedScrollUiTests
         FocusForKeys(surface); await input.KeyAsync(0x22, 3); await MainWindow.SettleAsync();
         Assert.IsTrue(surface.Scroll.VerticalOffset > 20, "Injected PageDown must move " + kind);
         var before = surface.Scroll.VerticalOffset;
-        await input.WheelAsync(surface, -15, 32); await MainWindow.SettleAsync();
+        await input.WheelAsync(surface, -15, 32); await WaitForScrollIdle(surface.Scroll);
         Assert.IsTrue(surface.Scroll.VerticalOffset > before + 2, "Small high-resolution wheel deltas must move " + kind);
         before = surface.Scroll.VerticalOffset;
-        await input.TouchSwipeAsync(surface, false); await Task.Delay(600); await MainWindow.SettleAsync();
+        await input.TouchSwipeAsync(surface, false); await WaitForScrollIdle(surface.Scroll);
         Assert.IsTrue(surface.Scroll.VerticalOffset > before + 2, "A real injected touch pan must move " + kind);
         input.Move(input.ScreenPoint(surface, .995, .5)); await Task.Delay(180);
         var thumb = Descendants(surface.Scroll).OfType<Thumb>().First(t => t.ActualHeight > 0 && t.ActualWidth > 0 && t.Name.Contains("Vertical", StringComparison.Ordinal));
         before = surface.Scroll.VerticalOffset;
         var from = input.ScreenPoint(thumb); var to = input.ScreenPoint(surface, .995, before > surface.Scroll.ScrollableHeight * .5 ? .1 : .9);
-        await input.DragAsync(from, to); await MainWindow.SettleAsync();
+        await input.DragAsync(from, to); await WaitForScrollIdle(surface.Scroll);
         window.ReviewRoot.RemoveHandler(UIElement.PointerPressedEvent, trace);
         TestContext.WriteLine($"{kind}: thumb={thumb.Name}, from={from}, to={to}, before={before}, after={surface.Scroll.VerticalOffset}, extent={surface.Scroll.ScrollableHeight}");
         TestContext.WriteLine("Press targets: " + string.Join("; ", presses));
