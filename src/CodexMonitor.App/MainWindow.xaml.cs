@@ -1039,7 +1039,8 @@ public sealed partial class MainWindow : Window
         if (_messageScroll is null) return;
         var up = _messageScroll.VerticalOffset < _previousTranscriptOffset;
         _previousTranscriptOffset = _messageScroll.VerticalOffset;
-        if (_jumpingLatest || MessageList.IsRestoringPosition) return;
+        if (_jumpingLatest || MessageList.IsRestoringPosition)
+        { if (!args.IsIntermediate) _transcriptScrollingFromInput = false; return; }
         var atEnd = _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
         if (_transcriptScrollingFromInput) _following = !_readingActivityHistory && atEnd;
         SetLatestVisible(_readingActivityHistory || !_following && !atEnd);
