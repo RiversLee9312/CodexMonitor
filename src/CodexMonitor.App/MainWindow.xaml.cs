@@ -114,6 +114,7 @@ public sealed partial class MainWindow : Window
         MessageList.NavigationRequested += forward =>
         {
             ++_transcriptViewportInput; _jumpingLatest = false; ++_latestScrollGeneration;
+            _following = false;
             if (forward) _earlierRequested = false; else { _following = false; RequestEarlier(); }
         };
         MessageList.Transitions = [];
@@ -130,7 +131,8 @@ public sealed partial class MainWindow : Window
         }), true);
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
         { ++_transcriptViewportInput; if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
-        MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => ++_transcriptViewportInput), true);
+        MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
+        { ++_transcriptViewportInput; _following = false; _jumpingLatest = false; ++_latestScrollGeneration; }), true);
         SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.Transitions = _noSessionTransitions;
@@ -1035,7 +1037,7 @@ public sealed partial class MainWindow : Window
         _previousTranscriptOffset = _messageScroll.VerticalOffset;
         if (_jumpingLatest || MessageList.IsRestoringPosition) return;
         var atEnd = _messageScroll.ScrollableHeight - _messageScroll.VerticalOffset < 24;
-        if (args.IsIntermediate || atEnd) _following = !_readingActivityHistory && atEnd;
+        if (atEnd && !_readingActivityHistory) _following = true;
         SetLatestVisible(_readingActivityHistory || !_following && !atEnd);
         if (up && args.IsIntermediate && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
     }
