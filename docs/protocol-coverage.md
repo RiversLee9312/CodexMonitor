@@ -59,7 +59,7 @@ Responses API 的 output_item.added、函数/自定义/MCP 参数、代码生成
 
 ## 0.1.12：列表分页与时间检索
 
-0.1.17 补充：`thread/tokenUsage/updated` 的 `turnId` 可将用量定位到轮次，但该通知没有模型字段。`last` 为最近一次模型请求，`total` 为当时的会话累计量，界面分别标注，不将其冒充轮次总量。模型仅来自明确的本地上下文、已观察的配置、响应或路由记录；配置与实际报告在详情中区分。历史轮次详情按需读取 `thread/turns/list` 的 `itemsView: notLoaded`，缓存游标并限制遍历，不水合历史 items。该能力按本机 Codex CLI 0.164.0 生成的 schema 与官方文档交叉核对。
+0.1.19 补充：`thread/tokenUsage/updated` 的 `turnId` 可将用量定位到轮次，但该通知没有模型字段。`last` 为最近一次模型请求，`total` 为当时的会话累计量，界面分别标注，不将其冒充轮次总量。模型仅来自明确的本地上下文、已观察的配置、响应或路由记录；配置与实际报告在详情中区分。历史轮次详情按需读取 `thread/turns/list` 的 `itemsView: notLoaded`，缓存游标并限制遍历，不水合历史 items。该能力按本机 Codex CLI 0.164.0 生成的 schema 与官方文档交叉核对。
 
 侧栏改用 thread/list 的 50 项游标页，显式指定 updated_at/desc，分别处理活动和归档目录。后续页不被视为新会话事件。连接与恢复保留原有内容时间；本地元数据按语义记录的 timestamp 与内容指纹判断变化，排除 turn_context 等元数据写入。真实内容更新以同一行对象移动位置，不冻结时间排序，也不重复插入已有行。
 

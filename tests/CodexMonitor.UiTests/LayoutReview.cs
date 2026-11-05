@@ -224,7 +224,7 @@ public sealed partial class MainWindow
         else { _snapshot = _snapshot! with { Entries = _snapshot.Entries.Append(new("activity-new", EntryKind.Tool, "echo new", DateTimeOffset.Now, Tool: new("shell", "echo new", "OK", ToolActivityState.Completed))).ToArray() }; RenderMessages(); await SettleAsync(); }
         var group = FindVisual<RepeaterList>(MessageList) ?? throw new InvalidOperationException("Activity list not realized");
         var scroll = group.Scroll;
-        if (!update) { scroll.ChangeView(null, 700, null, true); await SettleAsync(); }
+        if (!update) { group.BeginNavigation(true); scroll.ChangeView(null, 700, null, true); await SettleAsync(); }
         return scroll.VerticalOffset;
     }
     internal async Task<(double Before, double After, bool Paused, bool SameList)> NewReplyWhileReadingActivityReviewAsync()
@@ -239,9 +239,11 @@ public sealed partial class MainWindow
     }
     internal async Task<bool> ActivityAtEndFollowsNewItemsReviewAsync()
     {
-        await ActivityScrollReviewAsync(false); _following = true;
+        await ActivityScrollReviewAsync(false);
         var group = FindVisual<RepeaterList>(MessageList)!; var scroll = group.Scroll;
-        scroll.ChangeView(null, scroll.ScrollableHeight, null, true); await SettleAsync();
+        // Following requires both the outer transcript and the inner work viewport at
+        // their ends; use the same action as the floating button to establish that state.
+        ReviewJumpLatest(); await SettleAsync();
         await ActivityScrollReviewAsync(true); await SettleAsync();
         return scroll.ScrollableHeight - scroll.VerticalOffset < 2;
     }
@@ -353,6 +355,9 @@ public sealed partial class MainWindow
         RenderMessages(true); await SettleAsync();
     }
     internal IReadOnlyList<EntryRow> ReviewMessageRows => _messages.ToArray();
+    internal bool ReviewFollowing => _following;
+    internal async Task ReviewAdvanceTranscriptSourceAsync()
+    { InvalidateTranscriptRead(); _following = true; _readingActivityHistory = false; RenderMessages(); await SettleAsync(); }
     internal async Task ShowWaitReviewAsync(bool live, bool completed, string language, string theme)
     {
         await SetReviewAsync(760, 650, theme, language);

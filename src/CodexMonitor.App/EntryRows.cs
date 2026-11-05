@@ -11,8 +11,8 @@ internal static class EntryRows
         var present = target.ToDictionary(r => r.Entry.Id);
         for (int i = 0; i < desired.Count; i++)
         {
-            if (i < target.Count && target[i].Entry.Id == desired[i].Entry.Id) { if (!target[i].Matches(desired[i])) target[i].Update(desired[i]); }
-            else if (present.TryGetValue(desired[i].Entry.Id, out var row)) { target.Move(target.IndexOf(row), i); if (!row.Matches(desired[i])) row.Update(desired[i]); }
+            if (i < target.Count && target[i].Entry.Id == desired[i].Entry.Id) { if (!target[i].Matches(desired[i])) target[i].Update(desired[i]); else target[i].UpdateNavigation(desired[i]); }
+            else if (present.TryGetValue(desired[i].Entry.Id, out var row)) { target.Move(target.IndexOf(row), i); if (!row.Matches(desired[i])) row.Update(desired[i]); else row.UpdateNavigation(desired[i]); }
             else target.Insert(i, desired[i]);
         }
     }

@@ -437,6 +437,7 @@ public sealed partial class MainWindow : Window
     private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading, IReadOnlyList<RpcMessage>? initialNotifications = null)
     {
         _transcriptScrollingFromInput = false;
+        _jumpingLatest = false; ++_latestScrollGeneration;
         var generation = ++_transcriptReadGeneration;
         CancelEarlierRead();
         if (_localPagerSession != session.Id) RetireLocalPager();
@@ -504,14 +505,16 @@ public sealed partial class MainWindow : Window
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var viewingId = _selected?.Id;
         var authority = _historyClient;
+        var sourceGeneration = _transcriptReadGeneration;
+        bool CurrentSource() => _selected?.Id == viewingId && sourceGeneration == _transcriptReadGeneration && ReferenceEquals(authority, _historyClient);
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
             reading =>
             {
-                if (_selected?.Id != viewingId) return;
+                if (!CurrentSource()) return;
                 _readingActivityHistory = reading;
                 var atEnd = !reading && _messageScroll is { } viewport && viewport.ScrollableHeight - viewport.VerticalOffset < 24;
                 _following = atEnd; SetLatestVisible(!atEnd);
-            }, () => _following, _selected?.ActiveTurnId, _activityGroupIdentities, RequestEarlier,
+            }, () => CurrentSource() && _following, _selected?.ActiveTurnId, _activityGroupIdentities, () => { if (CurrentSource()) RequestEarlier(); },
             id => authority is null ? _snapshot.Turns.GetValueOrDefault(id) : authority.Models.Details(viewingId!, id),
             authority is null ? null : async (info, ct) =>
             {
@@ -520,9 +523,9 @@ public sealed partial class MainWindow : Window
                 if (!ReferenceEquals(authority, _historyClient) || _selected?.Id != viewingId) return info;
                 return detail is null ? info : detail with { FirstRecord = info.FirstRecord, LastRecord = info.LastRecord, LoadedItems = info.LoadedItems, Model = detail.Model ?? info.Model };
             }, _settings.AutoCollapseWork);
-        if (reset) _messages.Clear();
+        if (reset) { _transcriptScrollingFromInput = false; _messages.Clear(); }
         var anchor = !_following && !reset ? ScrollAnchor.Capture(MessageList) : null;
-        var viewportInput = _transcriptViewportInput; var sourceGeneration = _transcriptReadGeneration;
+        var viewportInput = _transcriptViewportInput;
         foreach (var container in MessageList.RealizedElements)
             if (container.Content is EntryRow row) TranscriptCard.PreserveScroll(container, row);
         if (_messages.Count != rows.Count || !_messages.Select(e => e.Entry.Id).SequenceEqual(rows.Select(e => e.Entry.Id))) _historyAwaitingLayout = true;
@@ -531,7 +534,7 @@ public sealed partial class MainWindow : Window
         MessageList.EndRestoration(restoring);
         anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
         NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ScrollLatest);
+        if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (CurrentSource()) ScrollLatest(); });
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             TrackTranscriptScroll();
@@ -755,7 +758,7 @@ public sealed partial class MainWindow : Window
         });
     }
     private void InvalidateTranscriptRead()
-    { ++_transcriptReadGeneration; CancelEarlierRead(); RetireLocalPager(); _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
+    { ++_transcriptReadGeneration; CancelEarlierRead(); RetireLocalPager(); _transcriptScrollingFromInput = false; _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;

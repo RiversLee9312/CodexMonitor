@@ -114,6 +114,8 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
         { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
         Role + (Entry.Kind == EntryKind.Assistant && Entry.Model is { Length: > 0 } model ? ", " + Text["FieldModel"] + " " + model : "") + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
     public event PropertyChangedEventHandler? PropertyChanged;
+    internal void UpdateNavigation(EntryRow next)
+    { HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; ReadTurn = next.ReadTurn; }
     public void Update(EntryRow next)
     { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; Turn = next.Turn; ReadTurn = next.ReadTurn; IsWorkProcess = next.IsWorkProcess; AutoCollapseWork = next.AutoCollapseWork; IsCurrentWork = next.IsCurrentWork; _displayDay = next._displayDay; PropertyChanged?.Invoke(this, new(null)); }
     public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities) && Turn == row.Turn && AutoCollapseWork == row.AutoCollapseWork && IsCurrentWork == row.IsCurrentWork && _displayDay == row._displayDay;
@@ -260,7 +262,9 @@ public sealed partial class TranscriptCard : UserControl
             group.Update(next);
             if (restoringPosition != 0) list.EndRestoration(restoringPosition);
             anchor?.Restore();
-            if (follow && !next.IsGroupCollapsed && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); });
+            var followInput = list.InputVersion;
+            if (follow && !next.IsGroupCollapsed && scroll is not null) list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            { if (list.IsLoaded && list.InputVersion == followInput && next.CanFollow?.Invoke() == true) { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); } });
             return;
         }
         var hadFocus = IsLoaded && AccessibilitySupport.ContainsFocus(this);
@@ -391,7 +395,7 @@ public sealed partial class TranscriptCard : UserControl
             var scroll = ScrollViewerIn(list); if (scroll is null) return;
             var initialFollow = !row.ScrollOffsets.ContainsKey(row.Entry.Id) && row.CanFollow?.Invoke() == true;
             var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
-            var restoring = true; var previousOffset = scroll.VerticalOffset;
+            var restoring = true; var previousOffset = scroll.VerticalOffset; var initialInput = list.InputVersion;
             EventHandler<ScrollViewerViewChangedEventArgs> viewChanged = (_, args) =>
             {
                 if (!restoring && list.IsLoaded && scroll.ScrollableHeight > 0)
@@ -407,6 +411,7 @@ public sealed partial class TranscriptCard : UserControl
             EventHandler<object>? layout = null;
             layout = (_, _) =>
             {
+                if (list.InputVersion != initialInput) { restoring = false; list.LayoutUpdated -= layout; return; }
                 if (!restoring || scroll.ScrollableHeight <= 0) return;
                 scroll.ChangeView(null, initialFollow ? scroll.ScrollableHeight : Math.Min(savedOffset, scroll.ScrollableHeight), null, true); restoring = false;
                 list.LayoutUpdated -= layout;

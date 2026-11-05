@@ -13,6 +13,26 @@ namespace CodexMonitor.UiTests;
 public sealed class WorkProcessUiTests
 {
     [TestMethod]
+    public void MatchedRowsRefreshNavigationOwnershipWithoutRebuildingTheirPresentation()
+    {
+        var text = new LocalizationService("zh-CN"); var entry = new TranscriptEntry("same-content", EntryKind.Assistant, "Stable response", default);
+        var old = new EntryRow(entry, text, canFollow: () => false); int changed = 0, navigated = 0;
+        old.PropertyChanged += (_, _) => changed++;
+        var rows = new System.Collections.ObjectModel.ObservableCollection<EntryRow> { old };
+        EntryRows.Synchronize(rows, new[] { new EntryRow(entry, text, canFollow: () => true, historyChanged: _ => navigated++) });
+        Assert.AreSame(old, rows.Single()); Assert.IsTrue(old.CanFollow!()); old.HistoryChanged!(true);
+        Assert.AreEqual(1, navigated); Assert.AreEqual(0, changed);
+    }
+    [UITestMethod]
+    public async Task OldSourceScrollCallbacksCannotChangeTheCurrentReadingMode()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Dark", "zh-CN");
+        await window.ShowConversationPresentationReviewAsync(new[] { new TranscriptEntry("owned-work", EntryKind.Tool, "echo work", default, Tool: new("shell", "echo work")) }, false);
+        var row = window.ReviewMessageRows.Single(); var stale = row.HistoryChanged!;
+        await window.ReviewAdvanceTranscriptSourceAsync(); stale(true);
+        Assert.IsTrue(window.ReviewFollowing); Assert.AreSame(row, window.ReviewMessageRows.Single()); Assert.IsTrue(row.CanFollow!());
+    }
+    [TestMethod]
     public void VariableHeightViewportIndexMatchesTheVisibleRowsAfterStreamingAndPrepending()
     {
         var random = new Random(7391);
