@@ -34,7 +34,7 @@ public sealed class RapidNavigationUiTests
         finally { root.Children.Remove(card); }
     }
 
-    [UITestMethod]
+    [UITestMethod, TestCategory("IsolatedPerformance")]
     public async Task NativeScrollPatternThenSelectionKeepsDispatcherResponsiveWithPromptSizedTitles()
     {
         var window = TestApp.ReviewWindow;
@@ -48,10 +48,6 @@ public sealed class RapidNavigationUiTests
             Id = "rapid-" + i, Title = "Conversation " + i + (i % 3 == 0 ? "\n" + prompt : ""), FilePath = file,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i), State = SessionState.Completed
         }).ToArray();
-        // This benchmark follows large transcript/automation fixtures in the same process.
-        // Retire their garbage before timing; all collections caused by this workload still
-        // count in maxGap. Never hide a pause or relax the interactive latency threshold.
-        await Task.Run(() => { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); });
         var clock = Stopwatch.StartNew(); double previous = clock.Elapsed.TotalMilliseconds, maxGap = 0;
         string phase = "catalog", slowestPhase = ""; var pause = GC.GetTotalPauseDuration(); double gapPause = 0; double slowestInput = 0;
         var ticks = 0; var timer = window.DispatcherQueue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(16);

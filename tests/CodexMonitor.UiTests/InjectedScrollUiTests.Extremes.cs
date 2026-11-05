@@ -11,10 +11,10 @@ namespace CodexMonitor.UiTests;
 
 public sealed partial class InjectedScrollUiTests
 {
-    [UITestMethod]
-    public async Task FastWheelReversalAcrossVariableHeightMessagesLeavesNoViewportHoles()
+    [UITestMethod, DataRow(560), DataRow(760), DataRow(1180)]
+    public async Task FastWheelReversalAcrossVariableHeightMessagesLeavesNoViewportHoles(int width)
     {
-        var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, "Dark", "zh-CN");
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(width, 700, "Dark", "zh-CN");
         var entries = Enumerable.Range(0, 400).Select(i => new TranscriptEntry("variable-" + i,
             i % 3 == 0 ? EntryKind.User : EntryKind.Assistant, "Message " + i + "\n\n" + new string('字', (i % 7) * 700 + 20), default)).ToArray();
         await window.ShowConversationPresentationReviewAsync(entries, false);
@@ -28,10 +28,10 @@ public sealed partial class InjectedScrollUiTests
             {
                 var list = window.ReviewTranscriptSurface;
                 TestContext.WriteLine($"Batch {batch}: offset={list.Scroll.VerticalOffset}, extent={list.Scroll.ExtentHeight}, height={list.Scroll.ViewportHeight}, items={list.Items.Count}; " + string.Join("; ", list.RealizedElements.Select(e => $"{e.Index}:y={e.TransformToVisual(list.Scroll).TransformPoint(new(0,0)).Y},h={e.ActualHeight}")));
-                TestContext.AddResultFile(await window.CaptureReviewAsync("injected-variable-height-gap")); throw;
+                TestContext.AddResultFile(await window.CaptureReviewAsync("injected-variable-height-gap-" + width)); throw;
             }
         }
-        TestContext.AddResultFile(await window.CaptureReviewAsync("injected-variable-height-no-gaps"));
+        TestContext.AddResultFile(await window.CaptureReviewAsync("injected-variable-height-no-gaps-" + width));
     }
     [UITestMethod]
     public async Task ContinuousFastSidebarWheelThenClickLoadsAPromptTitledConversationWithoutBlocking()

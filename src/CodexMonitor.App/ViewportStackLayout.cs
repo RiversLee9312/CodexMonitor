@@ -12,6 +12,7 @@ internal sealed partial class ViewportStackLayout(RepeaterList owner, double est
     private readonly HeightIndex _heights = new();
     private string[] _keys = [];
     private bool _dirty = true;
+    private bool _recheckQueued;
     private double _width = -1;
     protected override void OnItemsChangedCore(VirtualizingLayoutContext context, object source, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
     { _dirty = true; InvalidateMeasure(); }
@@ -29,15 +30,32 @@ internal sealed partial class ViewportStackLayout(RepeaterList owner, double est
         context.LayoutOrigin = new(0, 0); _elements.Clear();
         if (context.ItemCount == 0) return new(width, 0);
         var viewport = owner.Scroll.ViewportHeight > 0 ? owner.Scroll.ViewportHeight : 480;
-        for (int pass = 0; pass < 2; pass++)
+        // Measuring an anchor can change every subsequent row's position. Do it before
+        // choosing the viewport range, then converge on that range as estimates change.
+        if (context.RecommendedAnchorIndex is var anchor && anchor >= 0 && anchor < context.ItemCount) Measure(anchor);
+        var complete = false;
+        for (int pass = 0; pass < 8; pass++)
+        {
+            var (start, end) = Range();
+            for (int i = start; i <= end; i++) Measure(i);
+            (start, end) = Range();
+            complete = true;
+            for (int i = start; i <= end; i++) if (!_elements.ContainsKey(i)) { complete = false; break; }
+            if (complete) break;
+        }
+        if (!complete && !_recheckQueued)
+        {
+            _recheckQueued = true;
+            owner.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            { _recheckQueued = false; if (owner.IsLoaded) InvalidateMeasure(); });
+        }
+        return new(width, _heights.Total);
+
+        (int Start, int End) Range()
         {
             var offset = Math.Clamp(owner.Scroll.VerticalOffset, 0, Math.Max(0, _heights.Total - viewport));
-            var start = _heights.At(Math.Max(0, offset - viewport * .5));
-            var end = _heights.At(Math.Min(_heights.Total, offset + viewport * 1.5));
-            for (int i = start; i <= end; i++) Measure(i);
+            return (_heights.At(Math.Max(0, offset - viewport * .5)), _heights.At(Math.Min(_heights.Total, offset + viewport * 1.5)));
         }
-        if (context.RecommendedAnchorIndex is var anchor && anchor >= 0 && anchor < context.ItemCount) Measure(anchor);
-        return new(width, _heights.Total);
 
         void Measure(int index)
         {
