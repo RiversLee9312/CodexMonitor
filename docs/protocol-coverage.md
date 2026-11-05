@@ -55,6 +55,8 @@ item/tool/requestUserInput（兼容旧 tool/requestUserInput）映射选择、�
 
 Responses API 的 output_item.added、函数/自定义/MCP 参数、代码生成与图像生成进度统一为生成占位；直接消息和推理继续流式呈现。安装版 app-server 没有暴露这些 Responses 生成增量，原生 item/started 仍代表实际活动，不虚构前置生成阶段。补充 MCP、file_search、code_interpreter、program/program_output 的已知 Responses 结果布局。
 
+0.1.20：app-server 的活动回合在等待下一项内容时显示通用“工作中”占位。它仅属于视图，不写入对话记录，也不宣称某个工具正在生成。回复或推理流式输出、实际工具开始执行时移除；所有并行活动完成后，若回合仍在运行则再次显示。回合结束、等待用户操作和断联时不保留。`item/started` / `item/completed` 以及历史条目的完成时间区分直接文字流与回合等待；不把 Responses 工具参数增量当成 app-server 已有能力。
+
 参考：[App-server](https://learn.chatgpt.com/docs/app-server)、[Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events)、[Function calling](https://developers.openai.com/api/docs/guides/function-calling)。
 
 ## 0.1.12：列表分页与时间检索

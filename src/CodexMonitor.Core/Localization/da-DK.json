@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Cache-skrivetokens",
   "FieldReasoningTokens": "Reasoning-tokens",
   "AutoCollapseWork": "Fold arbejdsforløb automatisk sammen",
-  "AutoCollapseWorkHelp": "Fold afsluttede arbejdsforløb automatisk sammen, medmindre du folder dem ud. Igangværende arbejdsforløb forbliver altid udfoldede."
+  "AutoCollapseWorkHelp": "Fold afsluttede arbejdsprocesser sammen, medmindre du åbner dem. Igangværende arbejde åbnes automatisk og kan foldes sammen manuelt."
 }

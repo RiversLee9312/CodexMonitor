@@ -93,7 +93,11 @@ public sealed class PagingAndInputUiTests
             for (int i = 0; i < 80 && initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset >= 2; i++) await Task.Delay(25);
             TestContext.WriteLine("Initial work viewport: " + window.ReviewScrollDebug + ", " + window.ReviewHistoryState);
             Assert.IsLessThan(2d, initial.Scroll.ScrollableHeight - initial.Scroll.VerticalOffset, "A newly opened work process starts at its latest activity");
-            var anchor = await window.ReviewScrollToolHistoryAsync(); for (int i = 0; i < 30 && window.ReviewLoadingEarlier; i++) await Task.Delay(30); await MainWindow.SettleAsync();
+            var anchor = await window.ReviewScrollToolHistoryAsync();
+            // A request deferred until layout is still pending even when no dispatcher callback is queued.
+            // Observe its result rather than assuming it entered the decoder before the next frame.
+            for (int i = 0; i < 150 && (window.ReviewLoadingEarlier || window.ReviewLoadedCount < 600); i++) await Task.Delay(30);
+            await MainWindow.SettleAsync();
             Assert.AreEqual(600, window.ReviewLoadedCount); Assert.AreSame(disclosure, window.ReviewVisualElements<ActivityDisclosure>().First(t => Microsoft.UI.Xaml.Automation.AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal)));
             Assert.IsInstanceOfType<FrameworkElement>(anchor.List.ContainerFromItem(anchor.Item));
             var y = ((FrameworkElement)anchor.List.ContainerFromItem(anchor.Item)!).TransformToVisual(anchor.List).TransformPoint(new(0, 0)).Y; Assert.AreEqual(anchor.Y, y, 2);

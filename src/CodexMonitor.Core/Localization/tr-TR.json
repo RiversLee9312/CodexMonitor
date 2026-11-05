@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Önbellek yazma belirteçleri",
   "FieldReasoningTokens": "Akıl yürütme belirteçleri",
   "AutoCollapseWork": "İş süreçlerini otomatik daralt",
-  "AutoCollapseWorkHelp": "Tamamlanan iş süreçlerini siz genişletmediğiniz sürece daraltın. Devam eden süreçler her zaman açık kalır."
+  "AutoCollapseWorkHelp": "Siz genişletmediğiniz sürece tamamlanan iş süreçlerini daraltın. Devam eden işler otomatik açılır ve elle daraltılabilir."
 }

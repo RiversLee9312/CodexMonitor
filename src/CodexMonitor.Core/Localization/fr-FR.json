@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Jetons écrits dans le cache",
   "FieldReasoningTokens": "Jetons de raisonnement",
   "AutoCollapseWork": "Réduire automatiquement les processus de travail",
-  "AutoCollapseWorkHelp": "Réduisez les processus terminés, sauf si vous les développez. Ceux en cours restent toujours développés."
+  "AutoCollapseWorkHelp": "Réduisez les processus terminés, sauf si vous les développez. Le travail en cours se développe automatiquement et peut être réduit."
 }

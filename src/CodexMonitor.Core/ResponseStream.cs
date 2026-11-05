@@ -23,6 +23,8 @@ public static class ResponseStream
         if (method is "response.completed" or "response.failed" or "response.incomplete" or "response.cancelled" or "response.error")
         {
             entries.RemoveAll(e => e.Tool?.State == ToolActivityState.Generating && (turnId is null || e.TurnId == turnId));
+            for (int i = 0; i < entries.Count; i++)
+                if (entries[i].IsStreaming && (turnId is null || entries[i].TurnId == turnId)) entries[i] = entries[i] with { IsStreaming = false };
             return entries.SequenceEqual(before) ? before : entries;
         }
         if (method == "response.output_item.added")
@@ -31,7 +33,7 @@ public static class ResponseStream
             if (item.Str("type") is "message" or "reasoning")
             {
                 var textEntry = TranscriptItemAdapter.ParseResponse(item, id, time);
-                if (textEntry is not null) Put(textEntry);
+                if (textEntry is not null) Put(textEntry with { IsStreaming = true });
             }
             else Pending(item.Str("name", item.Str("type")), item.Field("arguments").TextValue(), item.Str("type"));
         }
@@ -57,13 +59,13 @@ public static class ResponseStream
         else if (method is "response.output_text.delta" or "response.output_text.done")
         {
             var value = method.EndsWith(".done", StringComparison.Ordinal) ? p.Str("text") : (prior?.Text ?? "") + p.Str("delta");
-            Put(new(id, EntryKind.Assistant, value, time));
+            Put(new(id, EntryKind.Assistant, value, time, IsStreaming: method.EndsWith(".delta", StringComparison.Ordinal)));
         }
         else if (method is "response.reasoning_summary_text.delta" or "response.reasoning_text.delta")
         {
             var reasoning = prior?.Reasoning ?? new ReasoningContent("", "");
             reasoning = method == "response.reasoning_summary_text.delta" ? reasoning with { Summary = reasoning.Summary + p.Str("delta") } : reasoning with { FullText = reasoning.FullText + p.Str("delta") };
-            Put(new(id, EntryKind.Reasoning, reasoning.DisplayText, time, Reasoning: reasoning));
+            Put(new(id, EntryKind.Reasoning, reasoning.DisplayText, time, Reasoning: reasoning, IsStreaming: true));
         }
         else if (id.Length > 0 && (method.EndsWith(".in_progress", StringComparison.Ordinal) || method.EndsWith(".generating", StringComparison.Ordinal) || method.EndsWith(".partial_image", StringComparison.Ordinal)))
             Pending(prior?.Tool?.Name ?? "", prior?.Tool?.Input ?? "", prior?.Label ?? method);

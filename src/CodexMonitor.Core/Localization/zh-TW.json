@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "快取寫入 Token",
   "FieldReasoningTokens": "推理 Token",
   "AutoCollapseWork": "自動收合工作流程",
-  "AutoCollapseWorkHelp": "自動收合已結束的工作流程，除非你手動展開。進行中的工作流程一律保持展開。"
+  "AutoCollapseWorkHelp": "自動收合已結束的工作流程，保留手動展開的項目。進行中的工作預設展開，也可手動收合。"
 }

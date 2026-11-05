@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Cache-schrijftokens",
   "FieldReasoningTokens": "Redeneertokens",
   "AutoCollapseWork": "Werkprocessen automatisch inklappen",
-  "AutoCollapseWorkHelp": "Klap voltooide werkprocessen automatisch in, tenzij je ze uitklapt. Lopende processen blijven altijd uitgeklapt."
+  "AutoCollapseWorkHelp": "Klap voltooide werkprocessen in, tenzij je ze uitklapt. Lopend werk wordt automatisch uitgeklapt en kun je zelf inklappen."
 }

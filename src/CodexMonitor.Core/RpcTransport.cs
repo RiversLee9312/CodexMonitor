@@ -43,33 +43,7 @@ public sealed class StdioTransport : IRpcTransport
     }
 
     public static string ResolveExecutable(string executable)
-    {
-        if (string.IsNullOrWhiteSpace(executable)) throw new ArgumentException("Executable is required");
-        // npm's codex.cmd requires a shell. Resolve its native package instead of interpolating shell commands.
-        var candidates = Path.IsPathFullyQualified(executable) ? new[] { executable } :
-            (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator).SelectMany(dir =>
-                new[] { Path.Combine(dir, executable + ".exe"), Path.Combine(dir, executable + ".cmd"), Path.Combine(dir, executable) }).ToArray();
-        if (OperatingSystem.IsWindows() && (executable.Equals("codex", StringComparison.OrdinalIgnoreCase) || executable.Equals("codex.exe", StringComparison.OrdinalIgnoreCase)))
-            candidates = candidates.Concat([Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OpenAI", "Codex", "bin", "codex.exe")]).ToArray();
-        foreach (var candidate in candidates)
-        {
-            if (!File.Exists(candidate)) continue;
-            if (candidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return candidate;
-            if (candidate.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || candidate.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
-            {
-                var package = Path.Combine(Path.GetDirectoryName(candidate)!, "node_modules", "@openai");
-                if (Directory.Exists(package))
-                {
-                    var architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
-                    { System.Runtime.InteropServices.Architecture.Arm64 => "aarch64", System.Runtime.InteropServices.Architecture.X64 => "x86_64", _ => "i686" };
-                    var native = Directory.EnumerateFiles(package, "codex.exe", SearchOption.AllDirectories)
-                        .FirstOrDefault(p => p.Contains(architecture, StringComparison.OrdinalIgnoreCase));
-                    if (native is not null) return native;
-                }
-            }
-        }
-        throw new FileNotFoundException("Choose the native codex.exe executable in Settings", executable);
-    }
+        => new CodexExecutableDiscovery().Resolve(executable);
 
     public async Task SendAsync(string message, CancellationToken ct)
     {

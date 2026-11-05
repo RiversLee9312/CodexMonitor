@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Token yang ditulis ke cache",
   "FieldReasoningTokens": "Token penalaran",
   "AutoCollapseWork": "Ciutkan proses kerja secara otomatis",
-  "AutoCollapseWorkHelp": "Ciutkan proses kerja yang selesai secara otomatis, kecuali jika Anda membukanya. Proses yang sedang berjalan selalu tetap terbuka."
+  "AutoCollapseWorkHelp": "Ciutkan proses yang selesai kecuali jika Anda membukanya. Pekerjaan yang sedang berjalan terbuka otomatis dan dapat Anda ciutkan."
 }

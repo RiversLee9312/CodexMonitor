@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Cache-Schreib-Tokens",
   "FieldReasoningTokens": "Reasoning-Tokens",
   "AutoCollapseWork": "Arbeitsabläufe automatisch einklappen",
-  "AutoCollapseWorkHelp": "Abgeschlossene Arbeitsabläufe automatisch einklappen, sofern du sie nicht ausklappst. Laufende Arbeitsabläufe bleiben immer ausgeklappt."
+  "AutoCollapseWorkHelp": "Abgeschlossene Arbeitsabläufe werden eingeklappt, außer du klappst sie auf. Laufende Arbeit wird automatisch aufgeklappt und kann manuell eingeklappt werden."
 }

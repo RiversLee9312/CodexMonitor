@@ -6,6 +6,19 @@ namespace CodexMonitor.Core.Tests;
 [TestClass]
 public sealed class InstalledCliTests
 {
+    [TestMethod, TestCategory("Integration")]
+    public async Task DesktopCliIsDiscoveredWithoutAnyPathAndCanReportItsVersion()
+    {
+        if (Environment.GetEnvironmentVariable("CODEX_MONITOR_INTEGRATION") != "1") Assert.Inconclusive("Requires opt-in local CLI validation.");
+        var native = new CodexExecutableDiscovery(() => []).Resolve("codex");
+        var start = new System.Diagnostics.ProcessStartInfo(native) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.ArgumentList.Add("--version");
+        using var process = System.Diagnostics.Process.Start(start)!;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var output = await process.StandardOutput.ReadToEndAsync(timeout.Token); await process.WaitForExitAsync(timeout.Token);
+        Assert.AreEqual(0, process.ExitCode); StringAssert.Contains(output, "codex");
+        Console.WriteLine("Native desktop CLI resolved with no search PATH; --version succeeded.");
+    }
     [TestMethod]
     [TestCategory("Integration")]
     public async Task ExistingCompressedHistoryCanBeListedAndReadWithoutChangingItsFiles()

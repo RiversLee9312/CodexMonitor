@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "캐시 쓰기 토큰",
   "FieldReasoningTokens": "추론 토큰",
   "AutoCollapseWork": "작업 과정 자동으로 접기",
-  "AutoCollapseWorkHelp": "완료된 작업 과정은 자동으로 접고, 펼친 항목은 유지합니다. 진행 중인 작업 과정은 항상 펼쳐 둡니다."
+  "AutoCollapseWorkHelp": "완료된 작업 과정은 접고, 직접 펼친 항목은 유지합니다. 진행 중인 작업은 자동으로 펼쳐지며 직접 접을 수 있습니다."
 }

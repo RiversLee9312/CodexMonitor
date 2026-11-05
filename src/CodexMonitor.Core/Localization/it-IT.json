@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Token di scrittura cache",
   "FieldReasoningTokens": "Token di ragionamento",
   "AutoCollapseWork": "Comprimi automaticamente i processi di lavoro",
-  "AutoCollapseWorkHelp": "Comprimi automaticamente i processi completati, a meno che tu non li espanda. Quelli in corso restano sempre espansi."
+  "AutoCollapseWorkHelp": "Comprimi i processi completati, a meno che tu non li espanda. Il lavoro in corso si espande automaticamente e può essere compresso."
 }

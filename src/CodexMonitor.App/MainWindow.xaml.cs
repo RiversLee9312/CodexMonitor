@@ -522,7 +522,7 @@ public sealed partial class MainWindow : Window
                 var detail = await authority.ReadTurnInfoAsync(viewingId!, info.Id, info.FirstRecord, ct);
                 if (!ReferenceEquals(authority, _historyClient) || _selected?.Id != viewingId) return info;
                 return detail is null ? info : detail with { FirstRecord = info.FirstRecord, LastRecord = info.LastRecord, LoadedItems = info.LoadedItems, Model = detail.Model ?? info.Model };
-            }, _settings.AutoCollapseWork);
+            }, _settings.AutoCollapseWork, pendingWork: authority is not null && _selected?.State == SessionState.Active && query.Length == 0);
         if (reset) { _transcriptScrollingFromInput = false; _messages.Clear(); }
         var anchor = !_following && !reset ? ScrollAnchor.Capture(MessageList) : null;
         var viewportInput = _transcriptViewportInput;
@@ -533,7 +533,7 @@ public sealed partial class MainWindow : Window
         using (MessageList.DeferUpdates()) EntryRows.Synchronize(_messages, rows);
         MessageList.EndRestoration(restoring);
         anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
-        NoMessagesText.Visibility = entries.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        NoMessagesText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (CurrentSource()) ScrollLatest(); });
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
@@ -665,13 +665,13 @@ public sealed partial class MainWindow : Window
         try
         {
             var wasConnected = _client is { IsConnected: true };
-            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); await old.DisposeAsync(); }
+            if (_client is not null) { var old = _client; _client = null; _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); RenderMessages(); await old.DisposeAsync(); }
             _serverEvents.Clear();
             if (!wasConnected)
             {
-                if (!_settings.UseSharedServer) _resolveExecutable(_settings.Executable);
+                if (!_settings.UseSharedServer) await Task.Run(() => _resolveExecutable(_settings.Executable), _lifetime.Token);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token); timeout.CancelAfter(TimeSpan.FromSeconds(15));
-                IRpcTransport transport = _settings.UseSharedServer ? await SharedServerEndpoint.ConnectAsync(_settings.Endpoint, _settings.CodexHome, _settings.Executable, timeout.Token) : StdioTransport.Start(_settings.Executable, _settings.CodexHome);
+                IRpcTransport transport = _settings.UseSharedServer ? await SharedServerEndpoint.ConnectAsync(_settings.Endpoint, _settings.CodexHome, _settings.Executable, timeout.Token) : await Task.Run(() => StdioTransport.Start(_settings.Executable, _settings.CodexHome), timeout.Token);
                 var client = new CodexClient(new JsonRpcClient(transport));
                 ObserveClient(client);
                 try { await client.InitializeAsync(timeout.Token); _client = client; }
@@ -752,7 +752,7 @@ public sealed partial class MainWindow : Window
         {
             if (!_closing && ReferenceEquals(_client, client))
             {
-                _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
+                _attached.Clear(); ResetSessionSource(); InvalidateTranscriptRead(); RenderMessages(); UpdateChrome(); NoticeText("DisconnectedHint", InfoBarSeverity.Warning);
                 if (_selected is { FilePath.Length: > 0 } session) await LoadTranscriptAsync(session, false);
             }
         });

@@ -41,11 +41,11 @@ public static class TranscriptUpdates
                 var entry = TranscriptItemAdapter.Parse(p.Field("item"), time, method == "item/started" ? ToolActivityState.Running : ToolActivityState.Completed);
                 Upsert(entry); break;
             case "item/agentMessage/delta":
-                Upsert(new(id, EntryKind.Assistant, (prior?.Text ?? "") + p.Str("delta"), prior?.Timestamp ?? time)); break;
+                Upsert(new(id, EntryKind.Assistant, (prior?.Text ?? "") + p.Str("delta"), prior?.Timestamp ?? time, IsStreaming: true)); break;
             case "item/reasoning/summaryTextDelta": case "item/reasoning/textDelta":
                 var reasoning = prior?.Reasoning ?? new ReasoningContent(prior?.Text ?? "", "");
                 reasoning = method == "item/reasoning/summaryTextDelta" ? reasoning with { Summary = reasoning.Summary + p.Str("delta") } : reasoning with { FullText = reasoning.FullText + p.Str("delta") };
-                Upsert(new(id, EntryKind.Reasoning, reasoning.DisplayText, prior?.Timestamp ?? time, Reasoning: reasoning)); break;
+                Upsert(new(id, EntryKind.Reasoning, reasoning.DisplayText, prior?.Timestamp ?? time, Reasoning: reasoning, IsStreaming: true)); break;
             case "item/reasoning/summaryPartAdded":
                 if (prior?.Reasoning is { Summary.Length: > 0 } part && !part.Summary.EndsWith('\n'))
                 { part = part with { Summary = part.Summary + "\n\n" }; Upsert(prior with { Text = part.DisplayText, Reasoning = part }); }
@@ -85,7 +85,14 @@ public static class TranscriptUpdates
                 RealtimeText(p, method.EndsWith("/done", StringComparison.Ordinal)); break;
         }
         if (!method.StartsWith("legacy/", StringComparison.Ordinal) && TranscriptEvents.Parse(method, p, time) is { } activity) Upsert(activity);
-        if (method == "turn/completed") changed |= entries.RemoveAll(e => e.Tool?.State == ToolActivityState.Generating && (turnId is null || e.TurnId == turnId)) > 0;
+        if (method == "turn/completed")
+        {
+            var endedTurn = p.Field("turn").Str("id", turnId ?? "");
+            changed |= entries.RemoveAll(e => e.Tool?.State == ToolActivityState.Generating && (endedTurn.Length == 0 || e.TurnId == endedTurn)) > 0;
+            for (int i = 0; i < entries.Count; i++)
+                if (entries[i].IsStreaming && (endedTurn.Length == 0 || entries[i].TurnId == endedTurn))
+                { entries[i] = entries[i] with { IsStreaming = false }; changed = true; }
+        }
         if (method == "turn/completed" && p.Field("turn").Str("status") is "interrupted" or "failed")
         {
             for (int i = 0; i < entries.Count; i++) if (entries[i].Tool is { State: ToolActivityState.Running } running)

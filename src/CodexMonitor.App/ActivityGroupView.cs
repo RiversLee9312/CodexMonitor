@@ -53,8 +53,6 @@ internal sealed partial class ActivityGroupView : Grid
         }
         _row = row;
         List.MinHeight = row.Activities.Count >= 12 ? 480 : 0;
-        _toggle.CanCollapse = !(row.AutoCollapseWork && row.IsGroupBusy);
-        _toggle.IsEnabled = _toggle.CanCollapse;
         _applying = true; _toggle.SetExpanded(!row.IsGroupCollapsed); _applying = false; Paint();
     }
     private void Paint()

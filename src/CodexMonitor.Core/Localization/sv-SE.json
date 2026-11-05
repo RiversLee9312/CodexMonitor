@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Cache-skrivningstoken",
   "FieldReasoningTokens": "Resonemangstoken",
   "AutoCollapseWork": "Fäll automatiskt ihop arbetsprocesser",
-  "AutoCollapseWorkHelp": "Fäll automatiskt ihop avslutade arbetsprocesser om du inte expanderar dem. Pågående processer förblir alltid utfällda."
+  "AutoCollapseWorkHelp": "Fäll ihop avslutade arbetsprocesser om du inte öppnar dem. Pågående arbete öppnas automatiskt och kan fällas ihop manuellt."
 }

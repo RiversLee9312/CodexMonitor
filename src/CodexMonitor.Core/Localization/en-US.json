@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Cache write tokens",
   "FieldReasoningTokens": "Reasoning tokens",
   "AutoCollapseWork": "Automatically collapse work processes",
-  "AutoCollapseWorkHelp": "Collapse finished work processes unless you expand them. Keep ongoing work expanded."
+  "AutoCollapseWorkHelp": "Collapse completed work processes unless you expand them. Ongoing work opens automatically; you can collapse it."
 }

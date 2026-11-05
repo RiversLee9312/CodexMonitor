@@ -12,11 +12,12 @@ public static class TranscriptItemAdapter
         item = Normalize(item);
         var type = item.Str("type"); var id = item.Str("id", Guid.NewGuid().ToString());
         if (type is "error" or "warning") return TranscriptEvents.Parse(type, item, timestamp)! with { Id = id };
-        if ((type.Contains('_') || type == "message") && ParseResponse(item, id, timestamp) is { } response) return response;
+        if ((type.Contains('_') || type == "message") && ParseResponse(item, id, timestamp) is { } response)
+            return response with { IsStreaming = lifecycle == ToolActivityState.Running && response.Kind is EntryKind.Assistant or EntryKind.Reasoning };
         if (type == "reasoning")
         {
             var reasoning = ReasoningContent.Parse(item);
-            return new(id, EntryKind.Reasoning, reasoning.DisplayText, timestamp, type, Reasoning: reasoning);
+            return new(id, EntryKind.Reasoning, reasoning.DisplayText, timestamp, type, Reasoning: reasoning, IsStreaming: lifecycle == ToolActivityState.Running);
         }
         var kind = type switch
         {
@@ -33,7 +34,8 @@ public static class TranscriptItemAdapter
         };
         var tool = kind == EntryKind.Tool || type is "hookPrompt" or "subAgentActivity" or "plan" or "contextCompaction" or "enteredReviewMode" or "exitedReviewMode" ? ToolActivity.FromItem(item) : null;
         if (tool is { State: ToolActivityState.Unknown } && lifecycle is { } state) tool = tool with { State = state };
-        return new(id, kind, text, timestamp, type, RawJson: SupportedTypes.Contains(type) ? null : text, Tool: tool);
+        return new(id, kind, text, timestamp, type, RawJson: SupportedTypes.Contains(type) ? null : text, Tool: tool,
+            IsStreaming: lifecycle == ToolActivityState.Running && kind == EntryKind.Assistant);
     }
     public static JsonElement Normalize(JsonElement item)
     {

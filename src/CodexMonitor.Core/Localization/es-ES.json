@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Tokens escritos en caché",
   "FieldReasoningTokens": "Tokens de razonamiento",
   "AutoCollapseWork": "Contraer automáticamente los procesos de trabajo",
-  "AutoCollapseWorkHelp": "Contrae los procesos de trabajo finalizados, salvo que los expandas. Los que estén en curso permanecen expandidos."
+  "AutoCollapseWorkHelp": "Contrae los procesos terminados, salvo que los expandas. El trabajo en curso se expande automáticamente y puedes contraerlo."
 }

@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Tokeny zapisu do pamięci podręcznej",
   "FieldReasoningTokens": "Tokeny rozumowania",
   "AutoCollapseWork": "Automatycznie zwijaj procesy pracy",
-  "AutoCollapseWorkHelp": "Zwijaj ukończone procesy pracy, chyba że je rozwiniesz. Trwające procesy pozostają zawsze rozwinięte."
+  "AutoCollapseWorkHelp": "Zwijaj ukończone procesy, chyba że je rozwiniesz. Bieżąca praca rozwija się automatycznie i można ją zwinąć ręcznie."
 }

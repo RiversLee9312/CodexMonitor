@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Tokens gravados no cache",
   "FieldReasoningTokens": "Tokens de raciocínio",
   "AutoCollapseWork": "Recolher processos de trabalho automaticamente",
-  "AutoCollapseWorkHelp": "Recolha os processos de trabalho concluídos, a menos que você os expanda. Os que estiverem em andamento permanecem sempre expandidos."
+  "AutoCollapseWorkHelp": "Recolha os processos concluídos, exceto os que você expandiu. O trabalho em andamento se expande automaticamente e pode ser recolhido."
 }

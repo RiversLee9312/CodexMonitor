@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "キャッシュ書き込みトークン",
   "FieldReasoningTokens": "推論トークン",
   "AutoCollapseWork": "作業プロセスを自動で折りたたむ",
-  "AutoCollapseWorkHelp": "完了した作業プロセスを自動で折りたたみます。手動で展開した項目はそのまま表示し、進行中の作業は常に展開します。"
+  "AutoCollapseWorkHelp": "完了した作業プロセスを折りたたみ、手動で展開した項目はそのまま表示します。進行中の作業は自動で展開され、手動で折りたたむこともできます。"
 }

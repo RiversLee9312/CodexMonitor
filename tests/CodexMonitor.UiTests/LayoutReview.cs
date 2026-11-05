@@ -154,6 +154,12 @@ public sealed partial class MainWindow
     }
     internal async Task UpdateConversationPresentationReviewAsync(IReadOnlyList<TranscriptEntry> entries)
     { _snapshot = new(_selected!, entries); RenderMessages(); await SettleAsync(); }
+    internal void ReviewServerWorkAuthority()
+    {
+        _historyClient = _client; _historySessionId = _selected?.Id; _sessionEventClient = _client;
+        if (_selected is not null) _sessionEventMetadata[_selected.Id] = _selected;
+        RenderMessages();
+    }
     internal async Task ShowProtocolEntryReviewAsync(TranscriptEntry entry, bool expand = true, bool live = false)
     {
         if (live) { await ConnectReviewServerAsync(); _selected = _selected! with { IsLive = true, State = SessionState.Active }; }
@@ -255,7 +261,7 @@ public sealed partial class MainWindow
     internal void ReviewUsePaging() { _pagedReview = true; _following = true; }
     internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
     internal bool ReviewHasEarlier => _hasEarlier;
-    internal bool ReviewLoadingEarlier => _loadingEarlier || _earlierRequested && _earlierCheckQueued;
+    internal bool ReviewLoadingEarlier => _loadingEarlier || _earlierRequested;
     internal void ReviewQueueEarlier() => RequestEarlier();
     internal void ReviewTurnMetadata(params TurnInfo[] turns) { _snapshot = _snapshot! with { Turns = turns.ToDictionary(t => t.Id) }; RenderMessages(); }
     internal async Task<Flyout> ReviewOpenTurnInfoAsync()

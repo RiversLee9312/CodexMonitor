@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "Välimuistiin kirjoitetut tokenit",
   "FieldReasoningTokens": "Päättelytokenit",
   "AutoCollapseWork": "Pienennä työprosessit automaattisesti",
-  "AutoCollapseWorkHelp": "Pienennä valmiit työprosessit automaattisesti, ellet laajenna niitä. Käynnissä olevat prosessit pysyvät aina laajennettuina."
+  "AutoCollapseWorkHelp": "Kutista valmistuneet työvaiheet, ellet avaa niitä. Käynnissä oleva työ avautuu automaattisesti, ja voit kutistaa sen."
 }

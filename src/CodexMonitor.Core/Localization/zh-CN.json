@@ -308,5 +308,5 @@
   "FieldCacheWriteTokens": "缓存写入 Token",
   "FieldReasoningTokens": "推理 Token",
   "AutoCollapseWork": "自动折叠工作过程",
-  "AutoCollapseWorkHelp": "收起已结束的工作过程，保留手动展开的项目。正在进行的工作过程始终展开。"
+  "AutoCollapseWorkHelp": "收起已结束的工作过程，保留手动展开的项目。正在进行的工作默认展开，也可手动收起。"
 }

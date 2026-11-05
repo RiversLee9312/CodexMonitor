@@ -103,13 +103,13 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
     public bool AutoCollapseWork { get; private set; }
     public bool IsCurrentWork { get; private set; }
     public string ActivityTitle => Text.Format("Activities", Text.Number(Activities.Count));
-    public bool IsGroupCollapsed => AutoCollapseWork ? !IsGroupBusy && !Expanded.Contains(Entry.Id + ":group:manual") : Expanded.Contains(Entry.Id + ":group:collapsed");
+    public bool IsGroupCollapsed => Expanded.Contains(Entry.Id + ":group:collapsed") || AutoCollapseWork && !IsGroupBusy && !Expanded.Contains(Entry.Id + ":group:manual");
     public bool IsGroupBusy => IsLive && (IsCurrentWork || Activities.Any(e => e.Tool?.State is ToolActivityState.Running or ToolActivityState.Generating));
     public string ActivitySummary => string.Join(" · ", Activities.GroupBy(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.State == ToolActivityState.Generating ? "Working" : e.Tool?.CategoryKey ?? "Tool")
         .Take(4).Select(g => Text[g.Key] + " " + Text.Number(g.Count()))) + (Activities.Select(e => e.Kind == EntryKind.Reasoning ? "Reasoning" : e.Tool?.CategoryKey ?? "Tool").Distinct().Count() > 4 ? " · …" : "");
     public string Role => Text[Entry.Kind switch { EntryKind.User => "User", EntryKind.Assistant => "Assistant", EntryKind.Tool => "Tool", EntryKind.Reasoning => "Reasoning", _ => "SystemMessage" }];
     public string Time => Text.MessageTime(Entry.Timestamp);
-    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
+    public string AccessibleName => Activities.Count > 1 ? ActivityTitle : Entry.Tool?.State == ToolActivityState.Generating ? Text["Working"] : Entry.Reasoning is { Summary.Length: 0, FullText.Length: > 0 } ? Text["Thinking"] : Entry.Tool is { } tool ?
         (tool.CategoryKey == "ToolDetails" ? tool.Name : Text[tool.CategoryKey]) + ", " + tool.Summary + ", " + Text[tool.State switch
         { ToolActivityState.Failed => "ToolFailed", ToolActivityState.Interrupted => "EventInterrupted", ToolActivityState.Completed => "ToolCompleted", ToolActivityState.Running when IsLive => "ToolRunning", _ => "Tool" }] :
         Role + (Entry.Kind == EntryKind.Assistant && Entry.Model is { Length: > 0 } model ? ", " + Text["FieldModel"] + " " + model : "") + ", " + Time + ", " + Entry.Text[..Math.Min(160, Entry.Text.Length)].Replace('\n', ' ');
@@ -120,19 +120,26 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
     { Entry = next.Entry; Text = next.Text; Activities = next.Activities; IsLive = next.IsLive; HistoryChanged = next.HistoryChanged; CanFollow = next.CanFollow; Earlier = next.Earlier; Turn = next.Turn; ReadTurn = next.ReadTurn; IsWorkProcess = next.IsWorkProcess; AutoCollapseWork = next.AutoCollapseWork; IsCurrentWork = next.IsCurrentWork; _displayDay = next._displayDay; PropertyChanged?.Invoke(this, new(null)); }
     public bool Matches(EntryRow row) => Text.LanguageTag == row.Text.LanguageTag && IsLive == row.IsLive && Activities.SequenceEqual(row.Activities) && Turn == row.Turn && AutoCollapseWork == row.AutoCollapseWork && IsCurrentWork == row.IsCurrentWork && _displayDay == row._displayDay;
     public static IReadOnlyList<EntryRow> Project(IEnumerable<TranscriptEntry> entries, LocalizationService text, HashSet<string> expanded, bool live = false, Dictionary<string, double>? scrollOffsets = null, Action<bool>? historyChanged = null, Func<bool>? canFollow = null, string? liveTurnId = null, Dictionary<string, string>? groupIdentities = null, Action? earlier = null,
-        Func<string, TurnInfo?>? turnInfo = null, Func<TurnInfo, CancellationToken, Task<TurnInfo?>>? readTurn = null, bool autoCollapseWork = false)
+        Func<string, TurnInfo?>? turnInfo = null, Func<TurnInfo, CancellationToken, Task<TurnInfo?>>? readTurn = null, bool autoCollapseWork = false, bool pendingWork = false)
     {
         var rows = new List<EntryRow>(); var tools = new List<TranscriptEntry>();
+        var source = entries as IReadOnlyList<TranscriptEntry> ?? entries.ToArray();
+        if (pendingWork) source = WorkProcessState.WithPending(source, live, liveTurnId);
+        var boundary = "start";
         var usedIds = new HashSet<string>(StringComparer.Ordinal);
         void Flush()
         {
             if (tools.Count == 0) return;
-            var identity = tools.Select(e => groupIdentities?.GetValueOrDefault(e.Id)).FirstOrDefault(id => id is not null && !usedIds.Contains(id)) ?? tools[0].Id;
+            var segment = tools[0].TurnId is { Length: > 0 } turn ? "work-segment:" + turn + ":" + boundary : null;
+            var remembered = segment is null ? null : groupIdentities?.GetValueOrDefault(segment);
+            var identity = tools.Select(e => groupIdentities?.GetValueOrDefault(e.Id)).FirstOrDefault(id => id is not null && !usedIds.Contains(id)) ??
+                (remembered is not null && !usedIds.Contains(remembered) ? remembered : tools[0].Id);
             usedIds.Add(identity);
             if (groupIdentities is not null) foreach (var tool in tools) groupIdentities[tool.Id] = identity;
+            if (groupIdentities is not null && segment is not null) groupIdentities[segment] = identity;
             rows.Add(new(tools[0] with { Id = identity }, text, tools.ToArray(), expanded, live, scrollOffsets, historyChanged, canFollow, rows.Count == 0 ? earlier : null) { IsWorkProcess = true }); tools.Clear();
         }
-        foreach (var item in entries)
+        foreach (var item in source)
         {
             if (tools.Count > 0 && tools[^1].TurnId is { Length: > 0 } previousTurn && item.TurnId is { Length: > 0 } nextTurn && previousTurn != nextTurn) Flush();
             if (item.Kind == EntryKind.Reasoning && string.IsNullOrWhiteSpace(item.Text)) continue;
@@ -145,7 +152,7 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
                 }
                 else tools.Add(item);
             }
-            else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live, scrollOffsets: scrollOffsets, historyChanged: historyChanged, canFollow: canFollow)); }
+            else { Flush(); rows.Add(new(item, text, expanded: expanded, live: live, scrollOffsets: scrollOffsets, historyChanged: historyChanged, canFollow: canFollow)); boundary = item.Id; }
         }
         Flush();
         var lastActivity = rows.LastOrDefault(r => r.IsActivityGroup);
@@ -163,7 +170,7 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
         }
         foreach (var (key, members) in groups)
         {
-            var parts = members.SelectMany(r => r.Activities).ToArray();
+            var parts = members.SelectMany(r => r.Activities).Where(e => !WorkProcessState.IsPending(e)).ToArray();
             var knownId = key.StartsWith("observed:", StringComparison.Ordinal) ? "" : key;
             var details = turnInfo?.Invoke(knownId) ?? new TurnInfo(knownId);
             var times = parts.Where(e => e.Timestamp != default).Select(e => e.Timestamp).ToArray();
@@ -179,7 +186,6 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
 
 public sealed partial class ActivityDisclosure : Button
 {
-    public bool CanCollapse { get; set; } = true;
     public bool IsExpanded { get; private set; }
     public event Action? ExpansionChanged;
     public ActivityDisclosure()
@@ -196,7 +202,7 @@ public sealed partial class ActivityDisclosure : Button
     }
     public void SetExpanded(bool expanded)
     {
-        if (IsExpanded == expanded || !expanded && !CanCollapse) return;
+        if (IsExpanded == expanded) return;
         var before = IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
         IsExpanded = expanded; ExpansionChanged?.Invoke();
         if (FrameworkElementAutomationPeer.FromElement(this) is ActivityDisclosurePeer peer)

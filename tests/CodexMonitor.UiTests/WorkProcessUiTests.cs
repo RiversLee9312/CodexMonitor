@@ -1,5 +1,6 @@
 using CodexMonitor.App;
 using CodexMonitor.Core;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
@@ -70,8 +71,45 @@ public sealed class WorkProcessUiTests
         Assert.AreEqual(values.Length - 1, index.At(index.Total));
     }
     public TestContext TestContext { get; set; } = null!;
+    [UITestMethod, DataRow("Light", "zh-CN"), DataRow("Dark", "ar-SA")]
+    public async Task NativeServerWaitingUsesAStableCollapsiblePlaceholderAndDirectStreamsReplaceIt(string theme, string language)
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(560, 700, theme, language);
+        await window.ShowConversationPresentationReviewAsync(new[] { new TranscriptEntry("question", EntryKind.User, "Review the changes", default, TurnId: "turn") }, true);
+        window.ReviewServerWorkAuthority(); window.ReviewAutoCollapse(true); await MainWindow.SettleAsync();
+        void Notify(string method, string json)
+        { using var d = System.Text.Json.JsonDocument.Parse(json); window.NotifyTranscriptReview(new(method, d.RootElement.Clone())); }
+        bool Pending() => window.ReviewMessageRows.SelectMany(r => r.Activities).Any(e => e.Tool?.State == ToolActivityState.Generating);
+        var group = window.ReviewVisualElements<ActivityDisclosure>().Single(t => AutomationProperties.GetAutomationId(t).StartsWith("ActivityGroup-", StringComparison.Ordinal));
+        var identity = AutomationProperties.GetAutomationId(group);
+        Assert.IsTrue(Pending()); Assert.IsTrue(group.IsExpanded); Assert.AreEqual(1, window.ReviewLoadedCount, "A view-only pending item must never enter the authoritative transcript");
+        Assert.AreEqual(1, window.ReviewMessageRows.Last().Turn!.LoadedItems, "Pending views must not inflate the turn's record count");
+        var peer = (IExpandCollapseProvider)FrameworkElementAutomationPeer.CreatePeerForElement(group).GetPattern(PatternInterface.ExpandCollapse);
+        peer.Collapse(); await MainWindow.SettleAsync(); Assert.IsFalse(group.IsExpanded);
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"native-pending-collapsed-{theme}-{language}"));
+        Notify("item/started", """{"threadId":"review-session","turnId":"turn","item":{"id":"command","type":"commandExecution","command":"echo ready","status":"inProgress"}}""");
+        await MainWindow.SettleAsync();
+        Assert.IsFalse(Pending()); Assert.AreSame(group, window.ReviewVisualElements<ActivityDisclosure>().Single(t => AutomationProperties.GetAutomationId(t) == identity)); Assert.IsFalse(group.IsExpanded);
+        Notify("item/completed", """{"threadId":"review-session","turnId":"turn","item":{"id":"command","type":"commandExecution","command":"echo ready","status":"completed","aggregatedOutput":"ready"}}""");
+        await MainWindow.SettleAsync(); Assert.IsTrue(Pending()); Assert.IsFalse(group.IsExpanded);
+        peer.Expand(); await MainWindow.SettleAsync();
+        Assert.IsTrue(window.ReviewVisualElements<FrameworkElement>().Any(e => AutomationProperties.GetAutomationId(e).StartsWith("Working-work-pending:", StringComparison.Ordinal)));
+        TestContext.AddResultFile(await window.CaptureReviewAsync($"native-pending-expanded-{theme}-{language}"));
+        Notify("item/started", """{"threadId":"review-session","turnId":"turn","item":{"id":"reason","type":"reasoning","summary":["Checking the result"],"content":[]}}""");
+        await MainWindow.SettleAsync(); Assert.IsFalse(Pending());
+        Notify("item/completed", """{"threadId":"review-session","turnId":"turn","item":{"id":"reason","type":"reasoning","summary":["Checking the result"],"content":[]}}""");
+        await MainWindow.SettleAsync(); Assert.IsTrue(Pending());
+        Notify("item/started", """{"threadId":"review-session","turnId":"turn","item":{"id":"reply","type":"agentMessage","text":""}}""");
+        Notify("item/agentMessage/delta", """{"threadId":"review-session","turnId":"turn","itemId":"reply","delta":"Everything is ready"}""");
+        await MainWindow.SettleAsync(); Assert.IsFalse(Pending()); StringAssert.Contains(window.ReviewTranscriptText, "Everything is ready");
+        Notify("turn/completed", """{"threadId":"review-session","turn":{"id":"turn","status":"completed"}}""");
+        await MainWindow.SettleAsync(); Assert.IsFalse(Pending());
+        Notify("turn/started", """{"threadId":"review-session","turn":{"id":"next","status":"inProgress"}}""");
+        await MainWindow.SettleAsync(); Assert.IsTrue(Pending());
+        await window.ReviewDisconnectTranscriptServer(); await MainWindow.SettleAsync(); Assert.IsFalse(Pending(), "Disconnect must remove the server-only pending view");
+    }
     [UITestMethod, DataRow("Dark", "zh-CN"), DataRow("Light", "ar-SA")]
-    public async Task AutomaticCollapseKeepsManualChoicesAndNeverFoldsOngoingWork(string theme, string language)
+    public async Task AutomaticCollapseOpensOngoingWorkByDefaultButKeepsManualChoices(string theme, string language)
     {
         var window = TestApp.ReviewWindow; await window.SetReviewAsync(760, 700, theme, language);
         TranscriptEntry Entry(string id, string turn, ToolActivityState state) => new(id, EntryKind.Tool, "", DateTimeOffset.Now,
@@ -81,7 +119,10 @@ public sealed class WorkProcessUiTests
         ActivityDisclosure Group(string id) => window.ReviewVisualElements<ActivityDisclosure>().Single(t => AutomationProperties.GetAutomationId(t) == "ActivityGroup-" + id);
         Assert.IsFalse(Group("old-work").IsExpanded); Assert.IsTrue(Group("current-work").IsExpanded);
         var manual = Group("old-work"); manual.SetExpanded(true);
-        Group("current-work").SetExpanded(false); Assert.IsTrue(Group("current-work").IsExpanded);
+        var ongoing = Group("current-work"); ongoing.SetExpanded(false); Assert.IsFalse(ongoing.IsExpanded); Assert.IsTrue(ongoing.IsEnabled);
+        await window.UpdateConversationPresentationReviewAsync(entries.Select(e => e.Id == "current-work" ? e with { Tool = e.Tool! with { Output = "Still working" } } : e).ToArray());
+        Assert.AreSame(ongoing, Group("current-work")); Assert.IsFalse(ongoing.IsExpanded, "Streaming updates must not undo a user's collapse");
+        Assert.IsTrue(window.ReviewVisualElements<ProgressRing>().Any(r => r.IsActive && r.Visibility == Microsoft.UI.Xaml.Visibility.Visible));
         await window.UpdateConversationPresentationReviewAsync(entries.Select(e => e.Id == "current-work" ? e with { Tool = e.Tool! with { Output = "Done", State = ToolActivityState.Completed } } : e).Append(new("end", EntryKind.Assistant, "Finished", default, TurnId: "turn")).ToArray());
         Assert.AreSame(manual, Group("old-work")); Assert.IsTrue(manual.IsExpanded); Assert.IsFalse(Group("current-work").IsExpanded);
         manual.SetExpanded(false); window.ReviewAutoCollapse(false); window.ReviewAutoCollapse(true); await MainWindow.SettleAsync(); Assert.IsFalse(Group("old-work").IsExpanded);
