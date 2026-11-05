@@ -247,11 +247,12 @@ public sealed partial class TranscriptCard : UserControl
     private void RowUpdated(object? sender, PropertyChangedEventArgs args) => RefreshContent();
     private void RefreshContent()
     {
+        var sameOwner = ReferenceEquals(_rendered, Row);
         _rendered = Row;
         _renderedEntry = Row?.Entry; _renderedActivities = Row?.Activities; _renderedLanguage = Row?.Text.LanguageTag; _renderedLive = Row?.IsLive == true;
         _renderedTurn = Row?.Turn;
         if (Row is { IsWorkProcess: true } next && Content is Border { Child: ActivityGroupView group } && group.List is RepeaterList list && list.ItemsSource is ObservableCollection<EntryRow> children &&
-            children.Count > 0 && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
+            children.Count > 0 && ReferenceEquals(group.OwnerRow, next) && group.Identity == next.Entry.Id && children[0].Text.LanguageTag == next.Text.LanguageTag)
         {
             var scroll = ScrollViewerIn(list); var follow = next.CanFollow?.Invoke() == true && (scroll is null || scroll.ScrollableHeight - scroll.VerticalOffset < 24);
             var incoming = next.Activities.Select(entry => new EntryRow(entry, next.Text, expanded: next.Expanded, live: next.IsLive, scrollOffsets: next.ScrollOffsets, historyChanged: next.HistoryChanged, canFollow: next.CanFollow)).ToArray();
@@ -267,11 +268,11 @@ public sealed partial class TranscriptCard : UserControl
             { if (list.IsLoaded && list.InputVersion == followInput && next.CanFollow?.Invoke() == true) { list.UpdateLayout(); scroll.ChangeView(null, scroll.ScrollableHeight, null, true); } });
             return;
         }
-        var hadFocus = IsLoaded && AccessibilitySupport.ContainsFocus(this);
+        var hadFocus = sameOwner && IsLoaded && AccessibilitySupport.ContainsFocus(this);
         var focused = hadFocus ? FocusManager.GetFocusedElement(XamlRoot) as Control : null;
         var focusId = focused is null ? "" : AutomationProperties.GetAutomationId(focused);
         var focusName = focused is null ? "" : AutomationProperties.GetName(focused);
-        var positions = Content is DependencyObject previous ? VisualChildren(previous).OfType<ScrollViewer>()
+        var positions = sameOwner && Content is DependencyObject previous ? VisualChildren(previous).OfType<ScrollViewer>()
             .Select(scroll => (scroll.VerticalOffset, AtEnd: scroll.ScrollableHeight - scroll.VerticalOffset < 24)).ToArray() : [];
         Render();
         if ((positions.Length > 0 || focused is not null) && Content is FrameworkElement replacement)
@@ -393,7 +394,7 @@ public sealed partial class TranscriptCard : UserControl
         list.Loaded += (_, _) =>
         {
             var scroll = ScrollViewerIn(list); if (scroll is null) return;
-            var initialFollow = !row.ScrollOffsets.ContainsKey(row.Entry.Id) && row.CanFollow?.Invoke() == true;
+            var initialFollow = row.CanFollow?.Invoke() == true;
             var savedOffset = row.ScrollOffsets.GetValueOrDefault(row.Entry.Id);
             var restoring = true; var previousOffset = scroll.VerticalOffset; var initialInput = list.InputVersion;
             EventHandler<ScrollViewerViewChangedEventArgs> viewChanged = (_, args) =>

@@ -12,6 +12,25 @@ namespace CodexMonitor.UiTests;
 [TestClass, DoNotParallelize]
 public sealed class WorkProcessUiTests
 {
+    [UITestMethod]
+    public async Task RecycledCardsDoNotReuseWorkViewportsFromADifferentRowOwner()
+    {
+        var window = TestApp.ReviewWindow; await window.SetReviewAsync(1180, 800, "Dark", "zh-CN");
+        var entries = Enumerable.Range(0, 30).Select(i => new TranscriptEntry("owner-work-" + i, EntryKind.Tool, "echo " + i, default, Tool: new("shell", "echo " + i))).ToArray();
+        var text = new LocalizationService("zh-CN");
+        var card = new TranscriptCard { Row = EntryRow.Project(entries, text, [], canFollow: () => false).Single() };
+        var root = (Grid)window.ReviewRoot;
+        try
+        {
+            root.Children.Add(card); await MainWindow.SettleAsync();
+            var previous = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            card.Row = EntryRow.Project(entries, text, [], canFollow: () => true).Single(); await MainWindow.SettleAsync();
+            var current = window.ReviewVisualElements<ActivityGroupView>().Single().List;
+            Assert.AreNotSame(previous, current, "Identical item IDs do not make an old row's callbacks and scroll state valid for a new owner");
+            Assert.IsLessThan(2d, current.Scroll.ScrollableHeight - current.Scroll.VerticalOffset);
+        }
+        finally { root.Children.Remove(card); }
+    }
     [TestMethod]
     public void MatchedRowsRefreshNavigationOwnershipWithoutRebuildingTheirPresentation()
     {

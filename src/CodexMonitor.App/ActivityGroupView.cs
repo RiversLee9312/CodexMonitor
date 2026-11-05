@@ -10,6 +10,7 @@ namespace CodexMonitor.App;
 internal sealed partial class ActivityGroupView : Grid
 {
     internal RepeaterList List { get; }
+    internal EntryRow OwnerRow => _row;
     internal string Identity => _row.Entry.Id;
     private EntryRow _row;
     private bool _applying;
