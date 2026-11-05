@@ -177,6 +177,7 @@ public sealed partial class EntryRow(TranscriptEntry entry, LocalizationService 
 
 public sealed partial class ActivityDisclosure : Button
 {
+    public bool CanCollapse { get; set; } = true;
     public bool IsExpanded { get; private set; }
     public event Action? ExpansionChanged;
     public ActivityDisclosure()
@@ -193,7 +194,7 @@ public sealed partial class ActivityDisclosure : Button
     }
     public void SetExpanded(bool expanded)
     {
-        if (IsExpanded == expanded) return;
+        if (IsExpanded == expanded || !expanded && !CanCollapse) return;
         var before = IsExpanded ? ExpandCollapseState.Expanded : ExpandCollapseState.Collapsed;
         IsExpanded = expanded; ExpansionChanged?.Invoke();
         if (FrameworkElementAutomationPeer.FromElement(this) is ActivityDisclosurePeer peer)

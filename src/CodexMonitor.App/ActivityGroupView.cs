@@ -33,8 +33,6 @@ internal sealed partial class ActivityGroupView : Grid
         _toggle.ExpansionChanged += () =>
         {
             if (_applying) return;
-            if (_row.AutoCollapseWork && _row.IsGroupBusy && !_toggle.IsExpanded)
-            { _applying = true; _toggle.SetExpanded(true); _applying = false; return; }
             var key = _row.Entry.Id + ":group:collapsed";
             var manual = _row.Entry.Id + ":group:manual";
             if (_toggle.IsExpanded) { _row.Expanded.Remove(key); _row.Expanded.Add(manual); }
@@ -52,7 +50,10 @@ internal sealed partial class ActivityGroupView : Grid
             _footer = row.Turn is null ? null : TurnDetailsPanel.Button(row);
             if (_footer is not null) { SetRow(_footer, 2); Children.Add(_footer); }
         }
-        _row = row; _applying = true; _toggle.SetExpanded(!row.IsGroupCollapsed); _applying = false; Paint();
+        _row = row;
+        _toggle.CanCollapse = !(row.AutoCollapseWork && row.IsGroupBusy);
+        _toggle.IsEnabled = _toggle.CanCollapse;
+        _applying = true; _toggle.SetExpanded(!row.IsGroupCollapsed); _applying = false; Paint();
     }
     private void Paint()
     {
