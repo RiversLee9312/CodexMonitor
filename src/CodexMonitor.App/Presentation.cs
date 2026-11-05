@@ -392,10 +392,12 @@ public sealed partial class TranscriptCard : UserControl
         list.Repeater.Layout = new ViewportStackLayout(list);
         list.Scroll.ViewChanged += (_, _) => list.Repeater.InvalidateMeasure();
         ScrollViewer.SetIsVerticalScrollChainingEnabled(list, true);
-        var userScrolling = false;
+        var userScrolling = false; var pointerActive = false;
         list.NavigationRequested += forward => { userScrolling = true; if (!forward) row.Earlier?.Invoke(); };
         list.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
-        list.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
+        list.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => { pointerActive = true; userScrolling = true; }), true);
+        list.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => { pointerActive = false; if (userScrolling && list.Scroll.VerticalOffset < 160) row.Earlier?.Invoke(); }), true);
+        list.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) => pointerActive = false), true);
         list.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, _) => userScrolling = true), true);
         list.Loaded += (_, _) =>
         {
@@ -412,7 +414,7 @@ public sealed partial class TranscriptCard : UserControl
                     if (userScrolling && !list.IsRestoringPosition && scroll.VerticalOffset < previousOffset && scroll.VerticalOffset < 160) row.Earlier?.Invoke();
                 }
                 previousOffset = scroll.VerticalOffset;
-                if (!args.IsIntermediate) userScrolling = false;
+                if (!args.IsIntermediate && !pointerActive) userScrolling = false;
             };
             scroll.ViewChanged += viewChanged;
             list.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
@@ -472,6 +474,7 @@ public sealed partial class TranscriptCard : UserControl
                 panel.Children.Add(Expandable(entry.Id + ":thinking", ActivityHeader(row.Text["Thinking"], ToolActivityState.Unknown, row.Text, null, "Thinking"), row, () =>
                 {
                     var scroll = new ScrollViewer { Content = Markdown(full), MaxHeight = 320, IsVerticalScrollChainingEnabled = true, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+                    ScrollAnchor.EnableWheelChaining(scroll);
                     AutomationProperties.SetName(scroll, row.Text["Thinking"]);
                     scroll.ViewChanged += (_, _) => { if (scroll.ScrollableHeight - scroll.VerticalOffset > 24 && AccessibilitySupport.ContainsFocus(scroll)) row.HistoryChanged?.Invoke(true); };
                     return scroll;

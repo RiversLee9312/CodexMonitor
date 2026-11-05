@@ -83,6 +83,7 @@ internal static class ActivityDetails
             Grid.SetColumn(copy, 1); title.Children.Add(copy); section.Children.Add(title);
             var scroll = new ScrollViewer { Content = body, MaxHeight = 320, HorizontalScrollMode = ScrollMode.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, IsVerticalScrollChainingEnabled = true, UseSystemFocusVisuals = true };
             AutomationProperties.SetName(scroll, heading);
+            ScrollAnchor.EnableWheelChaining(scroll);
             var userScrolling = false;
             scroll.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);
             scroll.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => userScrolling = true), true);

@@ -25,6 +25,7 @@ public sealed partial class MainWindow
     private double _sessionPreviousOffset;
     private bool _sessionPageCheckQueued;
     private bool _sessionAwaitingLayout;
+    private bool _sessionPointerActive;
     private long _restoringSessionAnchor;
     private SessionDateField _sessionDateField;
     private DateOnly? _sessionDateFrom, _sessionDateThrough;
@@ -96,7 +97,7 @@ public sealed partial class MainWindow
     {
         var scroll = _sessionScroll!;
         var forward = scroll.VerticalOffset > _sessionPreviousOffset + .5;
-        var navigation = _restoringSessionAnchor == 0 && _pendingSessionAnchor is null && e.IsIntermediate;
+        var navigation = _restoringSessionAnchor == 0 && _pendingSessionAnchor is null && (e.IsIntermediate || _sessionPointerActive);
         if (navigation) { ++_sessionAnchorInputVersion; _pendingSessionAnchor = null; if (forward) ++_sessionPageIntent; }
         _sessionPreviousOffset = scroll.VerticalOffset; RequestMoreSessions();
     }
@@ -104,7 +105,13 @@ public sealed partial class MainWindow
     {
         if (_closing || _sessionPageCheckQueued) return;
         _sessionPageCheckQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { _sessionPageCheckQueued = false; if (!_closing) RequestMoreSessions(); });
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _sessionPageCheckQueued = false;
+            if (_closing) return;
+            if (_sessionAwaitingLayout) { SessionList.UpdateLayout(); _sessionAwaitingLayout = false; }
+            RequestMoreSessions();
+        });
     }
     private void OnSessionNavigationInput()
     { ++_sessionAnchorInputVersion; _restoringSessionAnchor = 0; _pendingSessionAnchor = null; }

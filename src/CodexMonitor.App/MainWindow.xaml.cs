@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
     private Storyboard? _latestTransition;
     private bool _jumpingLatest;
     private bool _transcriptScrollingFromInput;
+    private bool _transcriptPointerActive;
     private long _latestScrollGeneration;
     private long _transcriptViewportInput;
     private long _selectedLength = -1;
@@ -100,7 +101,11 @@ public sealed partial class MainWindow : Window
         SessionList.LayoutUpdated += (_, _) => { if (_sessionAwaitingLayout) { _sessionAwaitingLayout = false; QueueSessionPageCheck(); } };
         SessionList.NavigationRequested += forward => { OnSessionNavigationInput(); if (forward) { ++_sessionPageIntent; QueueSessionPageCheck(); } };
         SessionList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) => { OnSessionNavigationInput(); if (e.GetCurrentPoint(SessionList).Properties.MouseWheelDelta < 0) { ++_sessionPageIntent; QueueSessionPageCheck(); } }), true);
-        SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => OnSessionNavigationInput()), true);
+        SessionList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => { _sessionPointerActive = true; OnSessionNavigationInput(); }), true);
+        SessionList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => { _sessionPointerActive = false; QueueSessionPageCheck(); }), true);
+        SessionList.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) => _sessionPointerActive = false), true);
+        SessionList.Repeater.Layout = new ViewportStackLayout(SessionList, 89);
+        SessionList.Scroll.ViewChanged += (_, _) => SessionList.Repeater.InvalidateMeasure();
         SessionList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { OnSessionNavigationInput(); if (e.Key is VirtualKey.PageDown or VirtualKey.End or VirtualKey.Down) { ++_sessionPageIntent; QueueSessionPageCheck(); } }), true);
         _themeSettings = Microsoft.UI.System.ThemeSettings.CreateForWindowId(AppWindow.Id);
         _themeSettings.Changed += OnSystemThemeChanged;
@@ -119,8 +124,9 @@ public sealed partial class MainWindow : Window
             _transcriptScrollingFromInput = true;
             ++_transcriptViewportInput; _jumpingLatest = false; ++_latestScrollGeneration;
             _following = false;
-            if (forward) _earlierRequested = false; else { _following = false; RequestEarlier(); }
+            if (forward) CancelEarlierIntent(); else { _following = false; RequestEarlier(); }
         };
+        MessageList.RestorationCompleted += QueueEarlierCheck;
         MessageList.Transitions = [];
         MessageList.LayoutUpdated += (_, _) => { if (_historyAwaitingLayout) { _historyAwaitingLayout = false; QueueEarlierCheck(); } };
         MessageList.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
@@ -128,7 +134,7 @@ public sealed partial class MainWindow : Window
             _transcriptScrollingFromInput = true;
             ++_transcriptViewportInput;
             _jumpingLatest = false; ++_latestScrollGeneration;
-            if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) { _earlierRequested = false; return; }
+            if (e.GetCurrentPoint(MessageList).Properties.MouseWheelDelta <= 0) { CancelEarlierIntent(); return; }
             _following = false;
             for (var node = e.OriginalSource as DependencyObject; node is not null && node != MessageList; node = VisualTreeHelper.GetParent(node))
                 if (node is ScrollViewer inner && !ReferenceEquals(inner, MessageList.Scroll) && inner.VerticalOffset > 160) return;
@@ -137,7 +143,9 @@ public sealed partial class MainWindow : Window
         MessageList.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
         { _transcriptScrollingFromInput = true; ++_transcriptViewportInput; if (e.Key is VirtualKey.PageUp or VirtualKey.Home or VirtualKey.Up) { _jumpingLatest = false; ++_latestScrollGeneration; _following = false; RequestEarlier(); } }), true);
         MessageList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
-        { _transcriptScrollingFromInput = true; ++_transcriptViewportInput; _following = false; _jumpingLatest = false; ++_latestScrollGeneration; }), true);
+        { _transcriptPointerActive = true; _transcriptScrollingFromInput = true; ++_transcriptViewportInput; _following = false; _jumpingLatest = false; ++_latestScrollGeneration; }), true);
+        MessageList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => { _transcriptPointerActive = false; QueueEarlierCheck(); }), true);
+        MessageList.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) => _transcriptPointerActive = false), true);
         SessionList.Loaded += (_, _) => TrackSessionListScroll();
         SessionList.ItemsSource = _visibleSessionRows;
         SessionList.Transitions = _noSessionTransitions;
@@ -359,6 +367,7 @@ public sealed partial class MainWindow : Window
         try
         {
             SessionList.Transitions = _noSessionTransitions;
+            using var transaction = SessionList.DeferUpdates();
             for (int i = _visibleSessionRows.Count - 1; i >= 0; i--) if (!ids.Contains(_visibleSessionRows[i].Session.Id)) _visibleSessionRows.RemoveAt(i);
             for (int i = 0; i < visible.Length; i++)
             {
@@ -403,7 +412,7 @@ public sealed partial class MainWindow : Window
                 finally
                 {
                     if (_restoringSessionAnchor == anchorGeneration)
-                    { _sessionPreviousOffset = _sessionScroll?.VerticalOffset ?? _sessionPreviousOffset; _restoringSessionAnchor = 0; }
+                    { _sessionPreviousOffset = _sessionScroll?.VerticalOffset ?? _sessionPreviousOffset; _restoringSessionAnchor = 0; QueueSessionPageCheck(); }
                 }
             });
         }
@@ -550,6 +559,7 @@ public sealed partial class MainWindow : Window
     private void RequestEarlier()
     {
         if (!_hasEarlier || _snapshot is null) return;
+        _hiddenHistoryPageBudget = 4;
         _earlierRequested = true; QueueEarlierCheck();
     }
     private async Task LoadEarlierAsync()
@@ -558,6 +568,8 @@ public sealed partial class MainWindow : Window
         _loadingEarlier = true; EarlierRing.IsActive = true; EarlierRing.Visibility = Visibility.Visible;
         var generation = _transcriptReadGeneration; var client = _historyClient;
         var start = _historyStart; var cursor = _historyCursor;
+        var firstGroup = _messages.FirstOrDefault();
+        var hiddenBoundary = firstGroup is { IsWorkProcess: true, IsGroupCollapsed: true } ? firstGroup.Entry.Id : null;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_selectionCts?.Token ?? _lifetime.Token);
         _earlierCancellation = cancellation;
         var ct = cancellation.Token;
@@ -577,10 +589,16 @@ public sealed partial class MainWindow : Window
                 _historyStart = page.StartOffset; _hasEarlier = page.HasEarlier; _snapshot = page.Snapshot;
             }
             RenderMessages();
+            // A page consisting only of older tools can extend a collapsed group without
+            // creating any scrollable pixels. Continue a bounded prefetch so this does not
+            // look like a dead scroll boundary; fresh upward input renews the budget.
+            if (_hasEarlier && _hiddenHistoryPageBudget > 0 && hiddenBoundary is not null &&
+                _messages.FirstOrDefault() is { IsGroupCollapsed: true } first && first.Entry.Id == hiddenBoundary && AtEarlierBoundary())
+            { --_hiddenHistoryPageBudget; _earlierRequested = true; }
         }
         catch (OperationCanceledException) { }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcException)
-        { if (!ct.IsCancellationRequested && generation == _transcriptReadGeneration && _selected?.Id == session.Id) NoticeText("ReadFailed", InfoBarSeverity.Warning); }
+        { if (!ct.IsCancellationRequested && generation == _transcriptReadGeneration && _selected?.Id == session.Id) { CancelEarlierIntent(); NoticeText("ReadFailed", InfoBarSeverity.Warning); } }
         finally { if (ReferenceEquals(_earlierCancellation, cancellation)) { _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; QueueEarlierCheck(); } }
     }
     private LocalTranscriptPager GetLocalPager(string sessionId)
@@ -591,7 +609,7 @@ public sealed partial class MainWindow : Window
     private void RetireLocalPager()
     { if (_localPager is { } old) { _localPager = null; _localPagerSession = null; _ = old.DisposeAsync(); } }
     private void CancelEarlierRead()
-    { _earlierRequested = false; _historyAwaitingLayout = false; _earlierCancellation?.Cancel(); _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
+    { CancelEarlierIntent(); _historyAwaitingLayout = false; _earlierCancellation?.Cancel(); _earlierCancellation = null; _loadingEarlier = false; EarlierRing.IsActive = false; EarlierRing.Visibility = Visibility.Collapsed; }
     private void UpdateTitle()
     {
         SessionTitle.Text = _selected is null ? _text["Transcript"] : new SessionRow(_selected, _text).Title;
@@ -1050,7 +1068,8 @@ public sealed partial class MainWindow : Window
         if (_transcriptScrollingFromInput) _following = !_readingActivityHistory && atEnd;
         SetLatestVisible(_readingActivityHistory || !_following && !atEnd);
         if (up && _transcriptScrollingFromInput && _messageScroll.VerticalOffset < Math.Max(200, _messageScroll.ViewportHeight * 2)) RequestEarlier();
-        if (!args.IsIntermediate) _transcriptScrollingFromInput = false;
+        QueueEarlierCheck();
+        if (!args.IsIntermediate) _transcriptScrollingFromInput = _transcriptPointerActive;
     }
     private void SetLatestVisible(bool visible)
     {

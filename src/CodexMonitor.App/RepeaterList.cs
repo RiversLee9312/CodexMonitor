@@ -20,7 +20,7 @@ public partial class RepeaterList : UserControl
     internal bool IsRestoringPosition => _activeRestore != 0;
     internal long BeginRestoration() => _activeRestore = ++_restoreSequence;
     internal bool OwnsRestoration(long ticket) => _activeRestore == ticket;
-    internal void EndRestoration(long ticket) { if (_activeRestore == ticket) _activeRestore = 0; }
+    internal void EndRestoration(long ticket) { if (_activeRestore == ticket) { _activeRestore = 0; RestorationCompleted?.Invoke(); } }
     private void MarkInput() { InputVersion++; _activeRestore = 0; }
     internal void BeginNavigation(bool forward) { MarkInput(); NavigationRequested?.Invoke(forward); }
     private readonly HashSet<RepeaterListItem> _realized = [];
@@ -30,6 +30,7 @@ public partial class RepeaterList : UserControl
     private bool _positionsQueued;
     public event EventHandler? SelectionChanged;
     internal event Action<bool>? NavigationRequested;
+    internal event Action? RestorationCompleted;
     public DataTemplate? ItemTemplate { get; set; }
     public Style? ItemContainerStyle { get; set; }
     public ListViewSelectionMode SelectionMode { get; set; }
@@ -62,7 +63,7 @@ public partial class RepeaterList : UserControl
     public RepeaterList()
     {
         IsTabStop = false; HorizontalContentAlignment = HorizontalAlignment.Stretch; VerticalContentAlignment = VerticalAlignment.Stretch;
-        Repeater = new ItemsRepeater { Layout = new StackLayout(), VerticalCacheLength = 1.5, HorizontalAlignment = HorizontalAlignment.Stretch,
+        Repeater = new ItemsRepeater { Layout = new StackLayout(), VerticalCacheLength = 1.5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Top,
             // The factory's recycle pool must belong to this surface. A container from a
             // removed nested repeater must never be reparented into the sidebar or transcript.
             ItemTemplate = (DataTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:local='using:CodexMonitor.App'><local:RepeaterListItem/></DataTemplate>") };
@@ -70,6 +71,7 @@ public partial class RepeaterList : UserControl
             VerticalScrollMode = ScrollMode.Enabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalAnchorRatio = 0, IsTabStop = false, IsVerticalScrollChainingEnabled = true };
         Content = Scroll;
+        ScrollAnchor.EnableWheelChaining(Scroll);
         TabFocusNavigation = KeyboardNavigationMode.Once;
         AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, _) => MarkInput()), true);
         AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => MarkInput()), true);
@@ -185,13 +187,30 @@ public partial class RepeaterList : UserControl
     }
     private void OnNavigation(object sender, KeyRoutedEventArgs e)
     {
-        if (SelectionMode != ListViewSelectionMode.Single || Items.Count == 0) return;
+        if (Items.Count == 0) return;
+        if (SelectionMode != ListViewSelectionMode.Single)
+        {
+            var target = e.Key switch
+            {
+                VirtualKey.Up => Scroll.VerticalOffset - 40, VirtualKey.Down => Scroll.VerticalOffset + 40,
+                VirtualKey.PageUp => Scroll.VerticalOffset - Scroll.ViewportHeight, VirtualKey.PageDown => Scroll.VerticalOffset + Scroll.ViewportHeight,
+                VirtualKey.Home => 0, VirtualKey.End => Scroll.ScrollableHeight, _ => double.NaN
+            };
+            if (double.IsNaN(target)) return;
+            BeginNavigation(target >= Scroll.VerticalOffset && e.Key is not (VirtualKey.Up or VirtualKey.PageUp or VirtualKey.Home));
+            target = Math.Clamp(target, 0, Scroll.ScrollableHeight);
+            if (Math.Abs(target - Scroll.VerticalOffset) < .5) return; // Let an exhausted inner surface chain to its parent.
+            Scroll.ChangeView(null, target, null, true); e.Handled = true; return;
+        }
         if (e.OriginalSource is not RepeaterListItem && e.OriginalSource is not ScrollViewer && !ReferenceEquals(e.OriginalSource, this)) return;
         var index = e.OriginalSource is RepeaterListItem focused ? focused.Index : Items.IndexOf(_selected);
         if (e.Key is VirtualKey.Enter or VirtualKey.Space && index >= 0)
         { SelectedItem = Items[index]; e.Handled = true; return; }
+        var page = Math.Max(1, LastVisibleIndex - FirstVisibleIndex);
         var next = e.Key switch
-        { VirtualKey.Up => Math.Max(0, index - 1), VirtualKey.Down => Math.Min(Items.Count - 1, index + 1), VirtualKey.Home => 0, VirtualKey.End => Items.Count - 1, _ => -1 };
+        { VirtualKey.Up => Math.Max(0, index - 1), VirtualKey.Down => Math.Min(Items.Count - 1, index + 1),
+            VirtualKey.PageUp => Math.Max(0, index - page), VirtualKey.PageDown => Math.Min(Items.Count - 1, index + page),
+            VirtualKey.Home => 0, VirtualKey.End => Items.Count - 1, _ => -1 };
         if (next < 0) return;
         NavigationRequested?.Invoke(next >= index); SelectedItem = Items[next]; ScrollIntoView(Items[next]!);
         ((Control)Repeater.GetOrCreateElement(next)).Focus(FocusState.Keyboard); e.Handled = true;

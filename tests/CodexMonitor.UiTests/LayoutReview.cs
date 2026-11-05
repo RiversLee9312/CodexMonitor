@@ -261,6 +261,13 @@ public sealed partial class MainWindow
     internal void ReviewUsePaging() { _pagedReview = true; _following = true; }
     internal int ReviewLoadedCount => _snapshot?.Entries.Count ?? 0;
     internal bool ReviewHasEarlier => _hasEarlier;
+    internal bool ReviewHistoryIoPending => _loadingEarlier || _serverRead is not null;
+    internal RepeaterList ReviewTranscriptSurface => MessageList;
+    internal RepeaterList ReviewSessionSurface => SessionList;
+    internal void ReviewBlockHistoryPaging(bool blocked) => _loadingEarlier = blocked;
+    internal void ReviewUnacknowledgedHistoryLayout() { _loadingEarlier = false; _earlierRequested = false; _historyAwaitingLayout = true; }
+    internal void ReviewBlockSessionPaging(bool blocked) => _sessionQueryLoading = blocked;
+    internal void ReviewUnacknowledgedSessionLayout() { _sessionQueryLoading = false; _sessionAwaitingLayout = true; }
     internal bool ReviewLoadingEarlier => _loadingEarlier || _earlierRequested;
     internal void ReviewQueueEarlier() => RequestEarlier();
     internal void ReviewTurnMetadata(params TurnInfo[] turns) { _snapshot = _snapshot! with { Turns = turns.ToDictionary(t => t.Id) }; RenderMessages(); }

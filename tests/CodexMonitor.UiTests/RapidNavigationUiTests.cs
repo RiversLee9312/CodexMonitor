@@ -48,25 +48,35 @@ public sealed class RapidNavigationUiTests
             Id = "rapid-" + i, Title = "Conversation " + i + (i % 3 == 0 ? "\n" + prompt : ""), FilePath = file,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-i), UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-i), State = SessionState.Completed
         }).ToArray();
+        // This benchmark follows large transcript/automation fixtures in the same process.
+        // Retire their garbage before timing; all collections caused by this workload still
+        // count in maxGap. Never hide a pause or relax the interactive latency threshold.
+        await Task.Run(() => { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); });
         var clock = Stopwatch.StartNew(); double previous = clock.Elapsed.TotalMilliseconds, maxGap = 0;
+        string phase = "catalog", slowestPhase = ""; var pause = GC.GetTotalPauseDuration(); double gapPause = 0; double slowestInput = 0;
         var ticks = 0; var timer = window.DispatcherQueue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(16);
-        timer.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; maxGap = Math.Max(maxGap, now - previous); previous = now; ticks++; };
+        timer.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; var nextPause = GC.GetTotalPauseDuration(); if (now - previous > maxGap) { maxGap = now - previous; slowestPhase = phase; gapPause = (nextPause - pause).TotalMilliseconds; } pause = nextPause; previous = now; ticks++; };
         timer.Start();
         try
         {
             await window.ReviewSessionCatalogAsync(sessions);
+            phase = "scroll";
             for (int i = 0; i < 60; i++)
             {
+                phase = "scroll " + i;
+                var inputStart = Stopwatch.GetTimestamp();
                 window.ReviewNativeSessionScroll(i % 4 < 2 ? 100 : 0);
+                slowestInput = Math.Max(slowestInput, Stopwatch.GetElapsedTime(inputStart).TotalMilliseconds);
                 await Task.Delay(16);
             }
             window.ReviewNativeSessionScroll(0);
+            phase = "selection";
             var click = Stopwatch.StartNew(); window.ReviewSelectSession(3);
             var synchronousClickMs = click.Elapsed.TotalMilliseconds;
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             while (window.ReviewTranscriptLoading) await Task.Delay(10, timeout.Token);
             await MainWindow.SettleAsync();
-            TestContext.WriteLine($"Navigation sample: max dispatcher gap={maxGap:F1} ms; synchronous selection={synchronousClickMs:F1} ms; content ready={click.Elapsed.TotalMilliseconds:F1} ms; ticks={ticks}; rows={window.ReviewSessionRows.Count}");
+            TestContext.WriteLine($"Navigation sample: max dispatcher gap={maxGap:F1} ms ({slowestPhase}), GC pause within gap={gapPause:F1} ms, longest synchronous scroll={slowestInput:F1} ms; synchronous selection={synchronousClickMs:F1} ms; content ready={click.Elapsed.TotalMilliseconds:F1} ms; ticks={ticks}; rows={window.ReviewSessionRows.Count}");
             Assert.Contains("Selected conversation is ready.", window.ReviewTranscriptText);
             Assert.AreEqual(window.ReviewSessionRows.Count, window.ReviewSessionRows.Select(s => s.Session.Id).Distinct().Count());
             Assert.IsLessThan(500d, maxGap, "A dispatcher stall must fail even if the test eventually finishes. Physical wheel bursts are also exercised with --manual-review-navigation.");
