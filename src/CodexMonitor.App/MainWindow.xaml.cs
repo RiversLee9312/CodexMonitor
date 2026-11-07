@@ -68,6 +68,9 @@ public sealed partial class MainWindow : Window
     private long _transcriptViewportInput;
     private long _selectedLength = -1;
     private long _transcriptReadGeneration;
+    // Request cancellation and view ownership have different lifetimes. A refresh
+    // must leave the visible view's navigation alive while its IO is in flight.
+    private long _transcriptViewGeneration;
     private ServerRead? _serverRead;
     private string? _historySessionId, _historyCursor;
     private CodexClient? _historyClient;
@@ -390,7 +393,9 @@ public sealed partial class MainWindow : Window
                 try
                 {
                 if (_closing || anchorGeneration != _sessionAnchorGeneration || inputVersion != _sessionAnchorInputVersion) return;
-                SessionList.ScrollIntoView(captured, ScrollIntoViewAlignment.Leading);
+                SessionList.UpdateLayout();
+                if (SessionList.ContainerFromItem(captured) is not FrameworkElement)
+                    SessionList.ScrollIntoView(captured, ScrollIntoViewAlignment.Leading);
                 for (int attempt = 0; attempt < 16; attempt++)
                 {
                     if (_closing || anchorGeneration != _sessionAnchorGeneration || inputVersion != _sessionAnchorInputVersion || !_visibleSessionRows.Contains(captured)) return;
@@ -445,7 +450,7 @@ public sealed partial class MainWindow : Window
     }
     private async Task LoadTranscriptAsync(SessionInfo session, bool showLoading, IReadOnlyList<RpcMessage>? initialNotifications = null)
     {
-        _transcriptScrollingFromInput = false;
+        if (showLoading) { ++_transcriptViewGeneration; _transcriptScrollingFromInput = false; }
         _jumpingLatest = false; ++_latestScrollGeneration;
         var generation = ++_transcriptReadGeneration;
         CancelEarlierRead();
@@ -514,8 +519,8 @@ public sealed partial class MainWindow : Window
         var entries = _snapshot.Entries.Where(e => query.Length == 0 || e.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)).ToArray();
         var viewingId = _selected?.Id;
         var authority = _historyClient;
-        var sourceGeneration = _transcriptReadGeneration;
-        bool CurrentSource() => _selected?.Id == viewingId && sourceGeneration == _transcriptReadGeneration && ReferenceEquals(authority, _historyClient);
+        var sourceGeneration = _transcriptViewGeneration;
+        bool CurrentSource() => _selected?.Id == viewingId && sourceGeneration == _transcriptViewGeneration && ReferenceEquals(authority, _historyClient);
         var rows = EntryRow.Project(entries, _text, _expandedActivities, _client is { IsConnected: true } && _selected is { IsLive: true, State: SessionState.Active or SessionState.Waiting }, _activityScrollOffsets,
             reading =>
             {
@@ -541,7 +546,7 @@ public sealed partial class MainWindow : Window
         var restoring = MessageList.BeginRestoration();
         using (MessageList.DeferUpdates()) EntryRows.Synchronize(_messages, rows);
         MessageList.EndRestoration(restoring);
-        anchor?.Restore(() => viewportInput == _transcriptViewportInput && sourceGeneration == _transcriptReadGeneration && _selected?.Id == viewingId);
+        anchor?.Restore(() => viewportInput == _transcriptViewportInput && CurrentSource());
         NoMessagesText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (_following && query.Length == 0) DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (CurrentSource()) ScrollLatest(); });
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -553,6 +558,7 @@ public sealed partial class MainWindow : Window
     }
     private void ResetHistory(string id, CodexClient? client)
     {
+        if (_historySessionId != id || !ReferenceEquals(_historyClient, client)) ++_transcriptViewGeneration;
         _historySessionId = id; _historyClient = client; _historyStart = null; _historyCursor = null; _hasEarlier = false;
         _activityGroupIdentities.Clear();
     }
@@ -776,7 +782,7 @@ public sealed partial class MainWindow : Window
         });
     }
     private void InvalidateTranscriptRead()
-    { ++_transcriptReadGeneration; CancelEarlierRead(); RetireLocalPager(); _transcriptScrollingFromInput = false; _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
+    { ++_transcriptViewGeneration; ++_transcriptReadGeneration; CancelEarlierRead(); RetireLocalPager(); _transcriptScrollingFromInput = false; _jumpingLatest = false; ++_latestScrollGeneration; _selectionCts?.Cancel(); _serverRead = null; foreach (var pending in _pendingInputs.Values) pending.Cancellation.Cancel(); if (_client is not { IsConnected: true }) _serverEvents.Clear(); }
     private async Task ConnectSessionAsync()
     {
         if (_selected is not { IsArchived: false } session || _findingSessionServer || _connecting || _sending) return;

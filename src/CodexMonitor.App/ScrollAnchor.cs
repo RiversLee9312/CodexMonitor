@@ -7,6 +7,10 @@ namespace CodexMonitor.App;
 
 internal sealed record ScrollAnchor(RepeaterList List, object Item, double Y, long InputVersion)
 {
+    private (object Item, double Y)[] _visible = [];
+    private (object Item, double Y)? SurvivingItem => List.Items.Contains(Item) ? (Item, Y) :
+        _visible.Where(p => List.Items.Contains(p.Item)).Select(p => ((object Item, double Y)?)p).FirstOrDefault();
+    internal (object Item, double Y)? Position => SurvivingItem;
     internal static Action<string>? Diagnostics { get; set; }
     // Native ScrollViewer chaining excludes inertial mouse-wheel input. Forward only
     // gestures that begin at an exhausted boundary; touch keeps its native policy.
@@ -36,40 +40,53 @@ internal sealed record ScrollAnchor(RepeaterList List, object Item, double Y, lo
     private static extern bool GetWheelLines(uint action, uint parameter, out uint value, uint flags);
     internal static ScrollAnchor? Capture(RepeaterList list)
     {
+        // A second update can precede the first update's layout. Keep the original
+        // reading point rather than capturing its temporarily displaced container.
+        if (list.PendingAnchor is { } pending && pending.InputVersion == list.InputVersion && pending.SurvivingItem is not null) return pending;
+        var visible = new List<(object Item, double Y)>();
         foreach (var element in list.RealizedElements)
-            if (element.Content is { } item)
+            if (element.IsLoaded && element.Content is { } item)
             {
                 var y = element.TransformToVisual(list).TransformPoint(new(0, 0)).Y;
-                if (y + element.ActualHeight > 0 && y < list.ActualHeight) return new(list, item, y, list.InputVersion);
+                if (y + element.ActualHeight > 0 && y < list.ActualHeight) visible.Add((item, y));
             }
-        return null;
+        return visible.Count == 0 ? null : new(list, visible[0].Item, visible[0].Y, list.InputVersion) { _visible = visible.ToArray() };
     }
     internal void Restore(Func<bool>? stillValid = null)
     {
-        bool Valid() => List.InputVersion == InputVersion && stillValid?.Invoke() != false && List.Items.Contains(Item) && List.IsLoaded;
+        bool Valid() => List.InputVersion == InputVersion && stillValid?.Invoke() != false && SurvivingItem is not null && List.IsLoaded;
         if (!Valid()) return;
+        List.PendingAnchor = this;
         var ticket = List.BeginRestoration();
         List.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
         {
             try
             {
-                for (int attempt = 0; attempt < 6 && Valid() && List.OwnsRestoration(ticket); attempt++)
+                var stable = 0;
+                for (int attempt = 0; attempt < 16 && Valid() && List.OwnsRestoration(ticket); attempt++)
                 {
                     List.UpdateLayout();
-                    if (List.ContainerFromItem(Item) is not FrameworkElement) { List.ScrollIntoView(Item, ScrollIntoViewAlignment.Leading); List.UpdateLayout(); }
-                    if (Adjust() && attempt >= 2) return;
+                    var item = SurvivingItem!.Value.Item;
+                    if (List.ContainerFromItem(item) is not FrameworkElement) { List.ScrollIntoView(item, ScrollIntoViewAlignment.Leading); List.UpdateLayout(); }
+                    stable = Adjust() ? stable + 1 : 0;
+                    if (stable >= 3) return;
                     await Task.Delay(16);
                 }
                 if (!Valid()) Diagnostics?.Invoke($"anchor cancelled: loaded={List.IsLoaded}, input={InputVersion}/{List.InputVersion}, contains={List.Items.Contains(Item)}");
             }
-            finally { Diagnostics?.Invoke($"anchor finished ticket={ticket} owns={List.OwnsRestoration(ticket)} valid={Valid()}"); List.EndRestoration(ticket); }
+            finally
+            {
+                Diagnostics?.Invoke($"anchor finished ticket={ticket} owns={List.OwnsRestoration(ticket)} valid={Valid()}");
+                if (List.OwnsRestoration(ticket) && ReferenceEquals(List.PendingAnchor, this)) List.PendingAnchor = null;
+                List.EndRestoration(ticket);
+            }
         });
     }
     private bool Adjust()
     {
-        if (!List.IsLoaded || List.ContainerFromItem(Item) is not FrameworkElement element || FindScroll(List) is not { } scroll) return false;
-        var delta = element.TransformToVisual(List).TransformPoint(new(0, 0)).Y - Y;
-        Diagnostics?.Invoke($"anchor count={List.Items.Count} desired={Y:F1} actual={Y+delta:F1} offset={scroll.VerticalOffset:F1} extent={scroll.ExtentHeight:F1} delta={delta:F1}");
+        if (!List.IsLoaded || SurvivingItem is not { } anchor || List.ContainerFromItem(anchor.Item) is not FrameworkElement element || FindScroll(List) is not { } scroll) return false;
+        var delta = element.TransformToVisual(List).TransformPoint(new(0, 0)).Y - anchor.Y;
+        Diagnostics?.Invoke($"anchor count={List.Items.Count} desired={anchor.Y:F1} actual={anchor.Y+delta:F1} offset={scroll.VerticalOffset:F1} extent={scroll.ExtentHeight:F1} delta={delta:F1}");
         if (Math.Abs(delta) > .5) scroll.ChangeView(null, Math.Clamp(scroll.VerticalOffset + delta, 0, scroll.ScrollableHeight), null, true);
         return Math.Abs(delta) <= .5;
     }

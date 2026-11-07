@@ -16,12 +16,13 @@ public partial class RepeaterList : UserControl
     internal ItemsRepeater Repeater { get; }
     internal ScrollViewer Scroll { get; }
     internal long InputVersion { get; private set; }
+    internal ScrollAnchor? PendingAnchor { get; set; }
     private long _restoreSequence, _activeRestore;
     internal bool IsRestoringPosition => _activeRestore != 0;
     internal long BeginRestoration() => _activeRestore = ++_restoreSequence;
     internal bool OwnsRestoration(long ticket) => _activeRestore == ticket;
     internal void EndRestoration(long ticket) { if (_activeRestore == ticket) { _activeRestore = 0; RestorationCompleted?.Invoke(); } }
-    private void MarkInput() { InputVersion++; _activeRestore = 0; }
+    private void MarkInput() { InputVersion++; _activeRestore = 0; PendingAnchor = null; }
     internal void BeginNavigation(bool forward) { MarkInput(); NavigationRequested?.Invoke(forward); }
     private readonly HashSet<RepeaterListItem> _realized = [];
     private object? _source, _selected;
@@ -41,6 +42,7 @@ public partial class RepeaterList : UserControl
         set
         {
             if (ReferenceEquals(_source, value)) return;
+            PendingAnchor = null; _activeRestore = 0;
             if (_observable is not null) _observable.CollectionChanged -= SourceChanged;
             _source = value; _view = new(Items); Repeater.ItemsSource = _view;
             _observable = value as INotifyCollectionChanged;
@@ -88,6 +90,7 @@ public partial class RepeaterList : UserControl
         Repeater.ElementClearing += (_, e) =>
         {
             var element = (RepeaterListItem)e.Element; _realized.Remove(element);
+            if (element.Content is EntryRow row) TranscriptCard.PreserveScroll(element, row);
             element.Owner = null; element.Index = -1; element.ContentTemplate = null; element.Content = null; element.DataContext = null;
         };
         Repeater.ElementIndexChanged += (_, e) => { var element = (RepeaterListItem)e.Element; element.Index = e.NewIndex; SetPosition(element); };

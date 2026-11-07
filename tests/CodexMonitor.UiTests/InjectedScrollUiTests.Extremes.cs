@@ -80,6 +80,8 @@ public sealed partial class InjectedScrollUiTests
             window.ReviewTranscriptFile(path); window.ReviewUsePaging(); await window.ReviewReloadTranscript(true); await MainWindow.SettleAsync();
             var input = new InjectedInput(window); await input.ActivateAsync();
             var clock = Stopwatch.StartNew(); double previous = 0, maximumGap = 0; int beats = 0;
+            var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;
+            var gcBefore = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
             var timer = window.DispatcherQueue.CreateTimer(); timer.Interval = TimeSpan.FromMilliseconds(16);
             timer.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; maximumGap = Math.Max(maximumGap, now - previous); previous = now; beats++; };
             timer.Start();
@@ -94,8 +96,8 @@ public sealed partial class InjectedScrollUiTests
                 await WaitFor(() => window.ReviewLoadedCount == 2400 && !window.ReviewHasEarlier, "Sustained wheel input must reach the oldest available record", 12000);
                 var rows = window.ReviewMessageRows.SelectMany(r => r.Activities).ToArray();
                 Assert.AreEqual(2400, rows.Select(e => e.Id).Distinct().Count());
+                TestContext.WriteLine($"Real wheel: compressed={compressed}, work={tools}; records={window.ReviewLoadedCount}; maximum dispatcher gap={maximumGap:F1} ms; beats={beats}; wall={clock.Elapsed.TotalMilliseconds:F1} ms; CPU={(Process.GetCurrentProcess().TotalProcessorTime - cpuBefore).TotalMilliseconds:F1} ms; collections=" + string.Join(",", Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - gcBefore[i])));
                 Assert.IsTrue(beats > 10); Assert.IsLessThan(600d, maximumGap, "Paging must not monopolize the UI dispatcher");
-                TestContext.WriteLine($"Real wheel: compressed={compressed}, work={tools}; records={window.ReviewLoadedCount}; maximum dispatcher gap={maximumGap:F1} ms; beats={beats}");
                 TestContext.AddResultFile(await window.CaptureReviewAsync($"injected-local-history-{compressed}-{tools}"));
             }
             finally { timer.Stop(); }

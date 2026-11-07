@@ -60,3 +60,11 @@ A held pointer remains user navigation through final thumb/touch frames. New inp
 Variable-height layout measures the recommended anchor before choosing its viewport range. It rechecks range coverage when newly measured heights shift later rows, with a bounded convergence loop and a deferred retry rather than leaving a viewport outside all realized rows. Mixed-height wheel reversal is exercised at 560, 760 and 1,180 DIP widths.
 
 Injected geometry assertions wait for native inertia and extent changes to settle; immediate click-after-wheel tests still click during motion. Input injection stops if the test window loses foreground ownership, rather than sending further packets to another application.
+
+Scroll restoration retains the first visible item and its viewport coordinate across a burst of updates, instead of recapturing a temporarily displaced layout. Same-count updates (including growing tool output and reasoning summaries) receive the same protection as insertions. A deleted anchor falls back to another surviving visible item. New input cancels pending corrections. Recycled work-process views also retain a logical activity ID and viewport coordinate; a saved absolute offset is only a fallback.
+
+Transcript request cancellation is separate from view/source ownership. Reading the same local file again leaves existing navigation callbacks usable while IO is pending, while session/source changes still invalidate them. Child views forward navigation through their current row rather than retaining an obsolete callback. Rebuilding streamed details restores focus without asking ancestor scrollers to navigate to that control, and delayed detail restoration yields to newer input.
+
+Retention tests cover local and server sidebar reordering, transcript and work-process height changes/bursts, actual append-only local file reloads, app-server lifecycle notifications, disconnect-to-local updates, offscreen recycling, and focused streamed tool output.
+
+Expanded details retain their original section offsets across repeated rebuilds that arrive before the first replacement has loaded. Sections are matched by accessible name and occurrence, so adding progress or standard-input sections does not apply an output offset to the wrong section.
